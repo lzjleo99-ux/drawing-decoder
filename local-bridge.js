@@ -3,6 +3,12 @@
    与 Artifact 沙箱版的区别：图片通道永远可用，单次可送 12 张图，提示词上限 40 万字节。 */
 'use strict';
 
+window.__MDD_LOCAL_BRIDGE__ = true; // 供 app.js 判断当前是独立站点（本地/公网）还是 Artifact 沙箱
+
+// 本地调试地址（localhost/局域网测试）用这个按钮把已保存的 Key 一键带去正式网站，
+// 不需要在两边分别手填。改成你自己的部署地址后，这个按钮才会在“非该地址”的页面上出现。
+const SYNC_TARGET_URL = 'https://lzjleo99-ux.github.io/drawing-decoder/';
+
 const LS_KEY = 'mdd.local.apikey';
 const LS_DS_KEY = 'mdd.local.dskey';
 const LS_MODEL = 'mdd.local.model';
@@ -11,13 +17,14 @@ const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const ANTHROPIC_FALLBACK_MODEL = 'claude-opus-5'; // DeepSeek 不支持图片，图片调用自动改走这个
 
 const MODELS = [
-  { id: 'claude-opus-5', name: 'Opus 5', note: '最强，推荐用于图纸识读', vendor: 'anthropic' },
-  { id: 'claude-sonnet-5', name: 'Sonnet 5', note: '更快更省', vendor: 'anthropic' },
-  { id: 'claude-haiku-4-5', name: 'Haiku 4.5', note: '最快，适合纯文本', vendor: 'anthropic' },
-  { id: 'deepseek-chat', name: 'DeepSeek V3（仅文本）', note: '更便宜，图片会自动改走 Opus 5', vendor: 'deepseek' },
-  { id: 'deepseek-reasoner', name: 'DeepSeek R1（仅文本）', note: '推理更强，图片会自动改走 Opus 5', vendor: 'deepseek' },
-  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', note: '支持图片，更快更省', vendor: 'deepseek' },
+  { id: 'claude-opus-5', name: 'Opus 5', noteKey: 'bridge.note.opus', vendor: 'anthropic' },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', noteKey: 'bridge.note.sonnet', vendor: 'anthropic' },
+  { id: 'claude-haiku-4-5', name: 'Haiku 4.5', noteKey: 'bridge.note.haiku', vendor: 'anthropic' },
+  { id: 'deepseek-chat', name: 'DeepSeek V3', noteKey: 'bridge.note.dschat', textOnly: true, vendor: 'deepseek' },
+  { id: 'deepseek-reasoner', name: 'DeepSeek R1', noteKey: 'bridge.note.dsreasoner', textOnly: true, vendor: 'deepseek' },
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', noteKey: 'bridge.note.dsflash', vendor: 'deepseek' },
 ];
+const bridgeT = (k) => (typeof t === 'function' ? t(k) : k);
 const EFFORT = { quick: 'low', default: 'high', complex: 'xhigh' };
 const isDeepSeek = (id) => /^deepseek-/.test(id);
 const VISION_DEEPSEEK = ['deepseek-flash'];   // 其余 DeepSeek 模型（V3/R1）不认图片
@@ -29,6 +36,23 @@ const getDSKey = () => { try { return localStorage.getItem(LS_DS_KEY) || ''; } c
 const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } catch (e) {} };
 const getModel = () => { try { return localStorage.getItem(LS_MODEL) || MODELS[0].id; } catch (e) { return MODELS[0].id; } };
 const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) {} };
+
+// 从「同步到线上网站」按钮打开的链接里取回 Key/模型设置，写入本页面的 localStorage
+let __syncImported = false;
+(function importSyncFromHash() {
+  const m = /(?:^|[?&#])sync=([^&]+)/.exec(location.hash) || /(?:^|[?&])sync=([^&]+)/.exec(location.search);
+  if (!m) return;
+  try {
+    const cfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+    if (cfg.anthropicKey) setKey(cfg.anthropicKey);
+    if (cfg.dsKey) setDSKey(cfg.dsKey);
+    if (cfg.wsId) setWS(cfg.wsId);
+    if (cfg.model) setModel(cfg.model);
+    __syncImported = true;
+  } catch (e) { console.warn('[bridge] sync 参数解析失败', e); }
+  // 清掉地址栏里的敏感参数，不留在浏览历史 / 地址栏截图里
+  try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&]sync=[^&]+/, '')); } catch (e) {}
+})();
 const LS_WS = 'mdd.local.workspace';
 const getWS = () => { try { return (localStorage.getItem(LS_WS) || '').trim(); } catch (e) { return ''; } };
 const setWS = (v) => { try { localStorage.setItem(LS_WS, v.trim()); } catch (e) {} };
@@ -100,7 +124,7 @@ function normalizeImages(imgs) {
 
 async function callAnthropic(model, turns, imgs, opts) {
   const key = getKey();
-  if (!key) throw { code: 'not_granted', message: '还没有填 Anthropic API Key。在页面顶部输入以 sk-ant- 开头的密钥后再试。' };
+  if (!key) throw { code: 'no_anthropic_key', message: '还没有填 Anthropic API Key。在页面顶部输入以 sk-ant- 开头的密钥后再试。' };
 
   const msgs = turns.map(t => ({ role: t.role, content: [{ type: 'text', text: String(t.content) }] }));
   if (imgs.length) {
@@ -163,7 +187,7 @@ async function callAnthropic(model, turns, imgs, opts) {
 
 async function callDeepSeek(model, turns, imgs, opts) {
   const key = getDSKey();
-  if (!key) throw { code: 'not_granted', message: '还没有填 DeepSeek API Key。在页面顶部「DeepSeek API Key」里输入后再试，或把模型换回 Claude。' };
+  if (!key) throw { code: 'no_deepseek_key', message: '还没有填 DeepSeek API Key。在页面顶部「DeepSeek API Key」里输入后再试，或把模型换回 Claude。' };
 
   const msgs = turns.map(t => ({ role: t.role, content: String(t.content) }));
   if (imgs.length) {
@@ -278,6 +302,15 @@ window.claude = {
 };
 
 /* ---- 顶部的 Key / 模型工具条 ---- */
+function renderModelOptions(sel) {
+  const cur = sel.value || getModel();
+  sel.innerHTML = MODELS.map(m => {
+    const nameShown = m.name + (m.textOnly ? bridgeT('bridge.textOnlySuffix') : '');
+    return '<option value="' + m.id + '">' + nameShown + ' — ' + bridgeT(m.noteKey) + '</option>';
+  }).join('');
+  sel.value = cur;
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   const input = document.getElementById('apiKey');
   const dsInput = document.getElementById('dsApiKey');
@@ -291,7 +324,7 @@ document.addEventListener('DOMContentLoaded', function () {
     ws.addEventListener('change', saveWS);
     ws.addEventListener('blur', saveWS);
   }
-  sel.innerHTML = MODELS.map(m => '<option value="' + m.id + '">' + m.name + ' — ' + m.note + '</option>').join('');
+  renderModelOptions(sel);
   sel.value = getModel();
   input.value = getKey();
   if (dsInput) dsInput.value = getDSKey();
@@ -301,13 +334,30 @@ document.addEventListener('DOMContentLoaded', function () {
     if (dsInput) dsInput.parentElement.hidden = !ds;
   };
 
+  const syncBtn = document.getElementById('syncBtn');
+  if (syncBtn) {
+    // 已经在目标网址上，或者没配置目标网址，就没必要显示这个按钮
+    if (!SYNC_TARGET_URL || location.href.indexOf(SYNC_TARGET_URL) === 0) {
+      syncBtn.hidden = true;
+    } else {
+      syncBtn.addEventListener('click', () => {
+        const cfg = { anthropicKey: getKey(), dsKey: getDSKey(), wsId: getWS(), model: getModel() };
+        if (!cfg.anthropicKey && !cfg.dsKey) { alert(bridgeT('bridge.syncNoKey')); return; }
+        const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
+        window.open(SYNC_TARGET_URL + '#sync=' + encoded, '_blank');
+        state.textContent = bridgeT('bridge.syncOpened');
+        state.className = 'keystate ok';
+      });
+    }
+  }
+
   const paint = () => {
     const model = getModel();
     const ds = isDeepSeek(model);
     const vision = visionCapable(model);
     const aOk = /^sk-ant-/.test(getKey());
     const dsOk = /^sk-/.test(getDSKey());
-    const T = (k) => (typeof t === 'function' ? t(k) : k);
+    const T = bridgeT;
     if (!ds) {
       state.textContent = aOk
         ? T('bridge.saved') + (getWS() ? '（' + T('auth.workspace') + ' ' + getWS().slice(0, 18) + '…）' : '')
@@ -323,7 +373,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const test = document.getElementById('testBtn');
   if (test) test.addEventListener('click', async () => {
-    const T = (k) => (typeof t === 'function' ? t(k) : k);
+    const T = bridgeT;
     const old = test.textContent;
     test.textContent = T('bridge.testing'); test.disabled = true;
     state.className = 'keystate';
@@ -344,5 +394,14 @@ document.addEventListener('DOMContentLoaded', function () {
     dsInput.addEventListener('blur', () => { setDSKey(dsInput.value); paint(); });
   }
   sel.addEventListener('change', () => { setModel(sel.value); paint(); });
+  renderModelOptions(sel); // 若刚从本地页面同步过来，模型可能变了，重新按当前值渲染下拉
+  sel.value = getModel();
+  input.value = getKey();
+  if (dsInput) dsInput.value = getDSKey();
+  if (ws) ws.value = getWS();
   paint();
+  if (__syncImported) { state.textContent = bridgeT('bridge.imported'); state.className = 'keystate ok'; }
+
+  // 供 app.js 在切换界面语言时调用，刷新顶部工具条的翻译
+  window.__refreshBridgeI18n = () => { renderModelOptions(sel); paint(); if (typeof applyI18n === 'function') applyI18n(); };
 });

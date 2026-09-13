@@ -37,10 +37,11 @@ img{max-width:100%}
     <input id="dsApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
   </div>
   <div class="field narrow">
-    <input id="wsId" type="text" placeholder="Workspace ID（组织级 Key 才需要，wrkspc_...）" autocomplete="off" spellcheck="false">
+    <input id="wsId" type="text" data-i18n-ph="bridge.wsPlaceholder" placeholder="Workspace ID (org-level keys only, wrkspc_...)" autocomplete="off" spellcheck="false">
   </div>
-  <select id="modelSel" aria-label="模型"></select>
-  <button id="testBtn" type="button">测试连接</button>
+  <select id="modelSel" data-i18n-aria="bridge.modelAria" aria-label="Model"></select>
+  <button id="testBtn" type="button" data-i18n="bridge.testBtn">Test connection</button>
+  <button id="syncBtn" type="button" data-i18n="bridge.syncBtn">Sync to live site</button>
   <span class="keystate" id="keyState"></span>
 </div>
 <title>机械图纸解译台</title>

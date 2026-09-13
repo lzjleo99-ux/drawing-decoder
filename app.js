@@ -31,7 +31,7 @@ function loadScript(url) {
     const s = document.createElement('script');
     s.src = url; s.async = true;
     s.onload = () => res();
-    s.onerror = () => rej(new Error('无法加载依赖: ' + url));
+    s.onerror = () => rej(new Error(t('err.loadScript') + url));
     document.head.appendChild(s);
   });
   scriptCache.set(url, p); return p;
@@ -68,7 +68,7 @@ async function boot() {
   const c = window.claude;
   const cap = $('#capState');
   if (!c || typeof c.use !== 'function') {
-    cap.className = 'cap off'; cap.innerHTML = '<i></i>离线预览';
+    cap.className = 'cap off'; cap.innerHTML = '<i></i>' + t('cap.offline');
     $('#runTeach').title = $('#runEng').title = '请在 claude.ai 网页中打开本页面以启用解析';
     return;
   }
@@ -99,12 +99,18 @@ function initLangSwitch() {
   if (!sel) return;
   sel.innerHTML = LANGS.map(l => '<option value="' + l + '">' + LANG_NAMES[l] + '</option>').join('');
   sel.value = getLang();
-  sel.addEventListener('change', () => {
-    setLang(sel.value);
+  sel.addEventListener('change', async () => {
+    const target = sel.value;
+    setLang(target);
     applyI18n();
+    if (typeof window.__refreshBridgeI18n === 'function') window.__refreshBridgeI18n();
     renderHistory();
     renderPresets();
-    if (S.report) renderReport();
+    if (S.report) {
+      if (S.demo) showExample();
+      else if (S.report.lang !== target) await translateReportContent(target);
+      else renderReport();
+    }
     syncRun();
   });
 }
@@ -125,7 +131,7 @@ const CODE_EXT = /\.(txt|nc|gcode|g|tap|cnc|iso|mpf|spf|prg|src|mod|st|scl|awl|i
 
 async function intake(file) {
   if (!file) return;
-  const name = file.name || '未命名';
+  const name = file.name || t('file.unnamed');
   const ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
   try {
     if (ext === '.pdf' || file.type === 'application/pdf') return await intakePDF(file);
@@ -149,7 +155,7 @@ async function intake(file) {
 
 async function intakeImage(file) {
   const bmp = await createImageBitmap(file).catch(() => null);
-  if (!bmp) throw new Error('这张图片无法解码（可能是 HEIC/TIFF），请另存为 PNG 或 JPG');
+  if (!bmp) throw new Error(t('err.imageDecode'));
   S.src = {
     kind: 'image', name: file.name, size: file.size, bitmap: bmp,
     w: bmp.width, h: bmp.height, pages: null, note: '',
@@ -162,7 +168,7 @@ async function intakePDF(file) {
   await loadScript(CDN.pdfjs);
   await loadScript(CDN.pdfworker).catch(() => {});
   const lib = window.pdfjsLib;
-  if (!lib) throw new Error('PDF 解析组件加载失败');
+  if (!lib) throw new Error(t('err.pdfLib'));
   try { lib.GlobalWorkerOptions.workerSrc = CDN.pdfworker; } catch (e) {}
   const buf = await file.arrayBuffer();
   const doc = await lib.getDocument({ data: buf, isEvalSupported: false }).promise;
@@ -228,12 +234,12 @@ async function intakeDXF(file) {
   toast(t('toast.parsingDXF'));
   const text = decodeSmart(await file.arrayBuffer());
   const { prims, texts, layers, header } = dxfParse(text);
-  if (!prims.length && !texts.length) throw new Error('这个 DXF 里没有可渲染的图元');
+  if (!prims.length && !texts.length) throw new Error(t('err.dxfEmpty'));
   const cv = dxfRender(prims, texts);
   const bmp = await createImageBitmap(cv);
   const ctxLines = [];
-  if (header.length) ctxLines.push('图形单位/变量：' + header.join('；'));
-  if (layers.length) ctxLines.push('图层：' + layers.slice(0, 40).join('、'));
+  if (header.length) ctxLines.push('Units/vars: ' + header.join('; '));
+  if (layers.length) ctxLines.push('Layers: ' + layers.slice(0, 40).join(', '));
   if (texts.length) ctxLines.push('图面文字（按坐标顺序，来自 DXF 文本实体，比 OCR 可靠）：\n' +
     texts.slice(0, 400).map(t => t.s).join(' | '));
   S.src = {
@@ -420,7 +426,7 @@ function dxfRender(prims, texts) {
 function paintSource() {
   const box = $('#srcBox'), meta = $('#srcMeta'), s = S.src;
   if (!s) return;
-  $('#srcKind').textContent = s.kind === 'code' ? '代码 / 文本' : '图纸';
+  $('#srcKind').textContent = TX(s.kind === 'code' ? '代码 / 文本' : '图纸');
   box.innerHTML = '';
   if (s.kind === 'image') {
     const cv = document.createElement('canvas');
@@ -440,9 +446,9 @@ function paintSource() {
     if (s.note) rows.push(['来源', s.note]);
   } else {
     rows.push(['行数', s.lines.toLocaleString()]);
-    if (s.truncated) rows.push(['注意', '超长，已截取前 26 万字符']);
+    if (s.truncated) rows.push(['注意', t('meta.truncated')]);
   }
-  meta.innerHTML = rows.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
+  meta.innerHTML = rows.map(([k, v]) => '<dt>' + esc(TX(k)) + '</dt><dd>' + esc(v) + '</dd>').join('');
   const oldStrip = document.getElementById('pageStrip');
   if (oldStrip) oldStrip.remove();
   if (s.pages && s.pages.length > 1) {
@@ -557,15 +563,15 @@ function planInfo(w, h, budget) {
   const ovScale = Math.min(1, Math.sqrt(TARGET_PX / (w * h)));
   const plan = tilePlan(w, h, budget);
   if (!plan) {
-    return { plan: null, text: '整图 ' + w + '×' + h + ' px，' + (ovScale >= 0.99 ? '低于单图上限，无需分块' : '未开启分块') };
+    return { plan: null, text: tf('plan.noTile', { w: w, h: h, reason: t(ovScale >= 0.99 ? 'plan.belowLimit' : 'plan.tileOff') }) };
   }
   const tileScale = Math.min(2.2, Math.sqrt(TARGET_PX / plan.cover));
   const mag = tileScale / ovScale;
   const native = plan.cover <= TARGET_PX * 1.02;
   return {
     plan: plan,
-    text: '分块 ' + plan.cols + '×' + plan.rows + '，共 ' + (plan.cols * plan.rows + 1) + ' 张送检\n' +
-      '细节相对整图放大 ' + mag.toFixed(1) + '×' + (native ? '，已达原图原生分辨率' : '，仍受单图像素上限限制'),
+    text: tf('plan.tiles', { c: plan.cols, r: plan.rows, n: plan.cols * plan.rows + 1 }) + '\n' +
+      tf('plan.mag', { m: mag.toFixed(1) }) + t(native ? 'plan.native' : 'plan.limited'),
   };
 }
 
@@ -580,7 +586,7 @@ async function prepareImages() {
   if (doEnhance) overview = enhance(overview);
   if (k < 0.98) overview = sharpen(overview, 0.35);
   out.push(await toBlob(overview));
-  labels.push('第 1 张 = 整幅图概览（全貌，用于把握布局和视图关系）');
+  labels.push('Image 1 = full overview (for overall layout and view relationships)');
 
   const budget = $('#optTile').checked ? maxCount - 1 : 0;
   const info = planInfo(s.w, s.h, budget);
@@ -963,6 +969,8 @@ const ERR_MSG = {
     cancelled: '已中止解析。',
     invalid_request: '请求参数有误，请刷新页面重试。',
     overloaded: '服务繁忙，请稍后重试。',
+    no_anthropic_key: '还没有填 Anthropic API Key。在页面顶部输入以 sk-ant- 开头的密钥后再试。',
+    no_deepseek_key: '还没有填 DeepSeek API Key。在页面顶部输入后再试，或把模型换回 Claude。',
     default: '解析失败，请重试',
   },
   en: {
@@ -974,6 +982,8 @@ const ERR_MSG = {
     cancelled: 'Analysis stopped.',
     invalid_request: 'Bad request parameters — refresh the page and try again.',
     overloaded: 'Service is busy — try again shortly.',
+    no_anthropic_key: 'No Anthropic API key set. Enter one starting with sk-ant- at the top of the page.',
+    no_deepseek_key: 'No DeepSeek API key set. Enter one at the top, or switch the model back to Claude.',
     default: 'Analysis failed, please retry',
   },
   sr: {
@@ -985,6 +995,8 @@ const ERR_MSG = {
     cancelled: 'Analiza je prekinuta.',
     invalid_request: 'Neispravni parametri zahteva — osveži stranicu i pokušaj ponovo.',
     overloaded: 'Servis je zauzet — pokušaj ponovo za koji trenutak.',
+    no_anthropic_key: 'Anthropic API ključ nije unet. Unesi ključ koji počinje sa sk-ant- na vrhu stranice.',
+    no_deepseek_key: 'DeepSeek API ključ nije unet. Unesi ga na vrhu ili vrati model na Claude.',
     default: 'Analiza nije uspela, pokušaj ponovo',
   },
 };
@@ -1061,7 +1073,7 @@ async function checkImages() {
     if (c === 'cancelled') throw e;
     // 只有明确的"本视图不能发图片"才判定不可用；限流、拒绝授权等另说
     S.imagesOK = (c === 'images_unavailable') ? false : true;
-    if (c === 'not_granted') throw e;
+    if (c === 'not_granted' || c === 'no_anthropic_key' || c === 'no_deepseek_key') throw e;
   }
   markCap();
   return S.imagesOK;
@@ -1070,11 +1082,11 @@ async function checkImages() {
 function markCap() {
   const cap = $('#capState');
   if (!cap || !S.sample) return;
-  if (S.imagesOK === true) { cap.className = 'cap on'; cap.innerHTML = '<i></i>视觉解析就绪'; }
+  if (S.imagesOK === true) { cap.className = 'cap on'; cap.innerHTML = '<i></i>' + t('cap.visionReady'); }
   else if (S.imagesOK === false) {
     cap.className = 'cap off';
-    cap.innerHTML = '<i></i>图片通道不可用';
-    cap.title = '本环境的 Claude 通道不接收图片。PDF / DXF 会自动改走矢量文字分析；位图图纸请改用 PDF、DXF，或把图片直接发到对话里。';
+    cap.innerHTML = '<i></i>' + t('cap.imageUnavailable');
+    cap.title = t('cap.tipNoImage');
   }
 }
 
@@ -1084,7 +1096,7 @@ async function askVisionJSON(prompt, imgs, opts) {
   } catch (e) {
     const c = e && e.code;
     if (c === 'image_rejected' && imgs.length > 1) {
-      toast('局部块被拒收，改用整图重试…', 4000);
+      toast(t('toast.tileRejected'), 4000);
       return await askJSON(prompt, Object.assign({ images: imgs.slice(0, 1) }, opts || {}));
     }
     if (c === 'prompt_too_large' && imgs.length > 2) {
@@ -1095,7 +1107,6 @@ async function askVisionJSON(prompt, imgs, opts) {
   }
 }
 
-const CLASS_CN = { drawing: '工程图纸', chart: '数据图表', schematic: '原理/系统图', photo: '实物照片', code: '程序代码' };
 function mapClass(c) {
   const v = txt(c).toLowerCase();
   if (v.indexOf('chart') >= 0) return 'chart';
@@ -1140,13 +1151,13 @@ async function runVisual() {
   const forced = S.docClass;
   const tier = S.tier, midTier = tier === 'quick' ? 'quick' : 'default';
 
-  const names = ['预处理与分块精读'];
-  if (forced === 'auto' && !doOCR) names.push('判别内容类型');
-  if (doOCR) names.push(forced === 'auto' ? '判别类型并转写全图文字' : '全图文字转写');
-  names.push('核心识读');
-  if (wantMat) names.push('材料与性能专项');
-  names.push(S.mode === 'teach' ? '生成识图教学' : '优化与验证方案');
-  names.push('汇总报告');
+  const names = [t('step.prep')];
+  if (forced === 'auto' && !doOCR) names.push(t('step.classify'));
+  if (doOCR) names.push(t(forced === 'auto' ? 'step.classifyOcr' : 'step.ocr'));
+  names.push(t('step.main'));
+  if (wantMat) names.push(t('step.material'));
+  names.push(t(S.mode === 'teach' ? 'step.teach' : 'step.eng'));
+  names.push(t('step.summary'));
   showProgress(names);
   let idx = 0;
   const next = () => setStep(idx++);
@@ -1155,7 +1166,7 @@ async function runVisual() {
   const prep = await prepareImages();
   const max = (S.limits.images && S.limits.images.maxCount) || 1;
   const imgs = prep.blobs.slice(0, max);
-  showPlan(prep.planText + (imgs.length < prep.blobs.length ? '\n受本环境单次张数上限，实际送检 ' + imgs.length + ' 张' : ''));
+  showPlan(prep.planText + (imgs.length < prep.blobs.length ? '\n' + tf('plan.capped', { n: imgs.length }) : ''));
 
   try {
     let cls = forced, clsNote = null;
@@ -1177,9 +1188,9 @@ async function runVisual() {
         '看不清的字符用 ? 占位。只输出 JSON：{"code":"转写出的完整代码，用 \\n 换行","unclear":["看不清的位置"]}',
         imgs, { modelTier: midTier, onText });
       const code = txt(tr && tr.code);
-      if (!code) throw new Error('未能从图片中转写出代码');
+      if (!code) throw new Error(t('err.noCodeFromImage'));
       S.src.transcribedCode = code;
-      return await runCodeCore(code, '（由图片转写）');
+      return await runCodeCore(code, t('plan.fromImage'));
     }
 
     let ocrRaw = null, ocrText = '';
@@ -1192,7 +1203,7 @@ async function runVisual() {
       } catch (e) {
         if (e && (e.code === 'cancelled' || e.code === 'images_unavailable')) throw e;
         console.warn('文字转写失败', e);
-        toast('文字转写未完成，继续进行整体识读。', 4000);
+        toast(t('toast.ocrIncomplete'), 4000);
       }
     }
 
@@ -1228,13 +1239,13 @@ async function runVisual() {
 // 图片通道不可用时的退路：PDF / DXF 还有矢量文字可用
 async function runNoImageFallback() {
   if (!has(S.src.vector)) {
-    showProgress(['检测图片通道']); setStep(0, 'fail');
+    showProgress([t('step.checkImages')]); setStep(0, 'fail');
     renderNoVisionNotice();
     throw { code: 'images_unavailable',
-      message: '本环境的 Claude 通道不接收图片。位图图纸请改投 PDF 或 DXF，或按报告区的提示把图发到对话里。' };
+      message: t('err.noVisionRaster') };
   }
-  toast('图片通道不可用，已改用源文件中的矢量文字继续分析。', 6000);
-  showProgress(['改用矢量文字识读', S.mode === 'teach' ? '生成识图教学' : '优化与验证方案', '汇总报告']);
+  toast(t('toast.vectorFallback'), 6000);
+  showProgress([t('step.vectorRead'), S.mode === 'teach' ? t('step.teach') : t('step.eng'), t('step.summary')]);
   setStep(0);
   const cls = S.docClass === 'chart' ? 'chart' : 'drawing';
   const pr = (cls === 'chart' ? chartPrompt : drawingPrompt)('（本次没有图片，只有下列从源文件中提取的文字信息）', S.src.vector, '');
@@ -1243,7 +1254,7 @@ async function runNoImageFallback() {
   let extra = null;
   try { extra = await askJSON(extraPrompt(S.mode, cls, d, ''), { onText, modelTier: S.tier }); } catch (e) { if (e && e.code === 'cancelled') throw e; }
   setStep(2);
-  finishReport(cls, d, null, { extra: extra, planText: '仅文字通道（无图片）' });
+  finishReport(cls, d, null, { extra: extra, planText: t('plan.textOnly') });
 }
 
 function splitByBytes(text, budget, maxParts) {
@@ -1268,8 +1279,8 @@ async function runCodeCore(full, label) {
   const budget = cap - 9000;
   const big = bytesOf(full) > budget;
   const parts = big ? splitByBytes(full, budget - 3000, 6) : null;
-  const names = (big ? parts.map((p, i) => '预读第 ' + (i + 1) + '/' + parts.length + ' 段') : [])
-    .concat(['解析程序结构与逐行含义', S.mode === 'teach' ? '生成教学讲解' : '改造与验证方案', '汇总报告']);
+  const names = (big ? parts.map((p, i) => tf('step.chunk', { i: i + 1, n: parts.length })) : [])
+    .concat([t('step.codeMain'), t(S.mode === 'teach' ? 'step.codeTeach' : 'step.codeEng'), t('step.summary')]);
   showProgress(names);
   let idx = 0;
   const next = () => setStep(idx++);
@@ -1280,7 +1291,7 @@ async function runCodeCore(full, label) {
     for (let i = 0; i < parts.length; i++) {
       next();
       try { digest.push(await askJSON(chunkPrompt(i, parts.length, parts[i].text, parts[i].start), { modelTier: 'default', onText })); }
-      catch (e) { if (e && e.code === 'cancelled') throw e; digest.push({ range: '第 ' + parts[i].start + ' 行起', purpose: '（该段预读失败）' }); }
+      catch (e) { if (e && e.code === 'cancelled') throw e; digest.push({ range: '#' + parts[i].start + '+', purpose: '(pre-read failed)' }); }
     }
   }
   next(); ticker('');
@@ -1293,7 +1304,7 @@ async function runCodeCore(full, label) {
   catch (e) { if (e && e.code === 'cancelled') throw e; toast(t(S.mode === 'teach' ? 'toast.modeFail.teach' : 'toast.modeFail.eng') + errMsg(e), 5000); }
 
   next();
-  finishReport('code', d, null, { extra: extra, planText: label ? '代码来源：' + label : '' });
+  finishReport('code', d, null, { extra: extra, planText: label ? t('plan.codeSource') + label : '' });
 }
 
 function sliceBytes(s, max) {
@@ -1328,25 +1339,23 @@ function chatPrompt(mode) {
 }
 
 function renderNoVisionNotice() {
-  const name = S.src ? S.src.name : '图纸';
+  const name = S.src ? S.src.name : t('novision.env');
+  const isLocal = typeof window.__MDD_LOCAL_BRIDGE__ !== 'undefined';
   $('#frame').innerHTML =
-    '<div class="tblock"><div class="cell wide"><span class="k">Environment · 环境限制</span>' +
-    '<span class="v">这个环境的 Claude 通道不接收图片</span></div></div>' +
-    '<section class="sec"><div class="sec-h"><span class="n">01</span><h3>发生了什么</h3>' +
+    '<div class="tblock"><div class="cell wide"><span class="k">' + esc(t('novision.env')) + '</span>' +
+    '<span class="v">' + esc(t('novision.title')) + '</span></div></div>' +
+    '<section class="sec"><div class="sec-h"><span class="n">01</span><h3>' + esc(t('novision.what')) + '</h3>' +
     '<span class="n-en">Diagnosis</span></div>' +
-    '<p class="lead">页面已经把 ' + esc(name) + ' 切好块、做完增强，但当前视图的 Claude 通道拒收图片（<code>images_unavailable</code>），' +
-    '所以视觉识读没法在页面内完成。这是运行环境的限制，不是图纸或设置的问题。</p>' +
-    '<div class="sub">三条可用的路</div>' +
+    '<p class="lead">' + tf('novision.lead', { name: esc(name) }) + '</p>' +
+    '<div class="sub">' + esc(t('novision.paths')) + '</div>' +
     '<ol class="flow">' +
-    '<li><b>换个入口打开本页</b>：在 claude.ai 网页版（浏览器）里打开这个 Artifact 链接，图片通道通常是开的。右上角徽标显示"视觉解析就绪"即可正常使用。</li>' +
-    '<li><b>改投矢量文件</b>：把图纸导出成 <b>PDF</b> 或 <b>DXF</b> 再投放。这两种格式里带有真实文字与图元，本工具会直接读取，完全不依赖图片通道，识读结果反而比看图更准。</li>' +
-    '<li><b>把图发到对话里</b>：点下面的按钮复制一份现成的识图提示词，在 Claude 对话中连同原图一起发送。</li>' +
-    '<li><b>用本地直连版</b>：项目目录里的 <code>start-local.command</code> 双击即可启动，它绕开本沙箱直接调 Anthropic API——图片通道永远可用，单次可送 12 张精读图块，提示词上限 40 万字节。</li>' +
+    t(isLocal ? 'novision.li1.local' : 'novision.li1.web') +
+    t('novision.li2') + t('novision.li3') +
     '</ol>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">' +
-    '<button class="btn" id="copyPromptBtn" type="button">复制识图提示词</button>' +
-    '<button class="btn ghost" id="backDemoBtn" type="button">返回示例报告</button></div>' +
-    '<div class="note-box">程序代码、G 代码、梯形图等纯文本文件不受影响，任何环境下都能正常分析。</div>' +
+    '<button class="btn" id="copyPromptBtn" type="button">' + esc(t('novision.copy')) + '</button>' +
+    '<button class="btn ghost" id="backDemoBtn" type="button">' + esc(t('novision.back')) + '</button></div>' +
+    '<div class="note-box">' + esc(t('novision.textOk')) + '</div>' +
     '</section>';
   $('#reportState').textContent = t('cap.imageUnavailable');
 }
@@ -1362,7 +1371,7 @@ function finishReport(kind, data, mat, extras) {
   const ex = extras || {};
   S.report = {
     kind: kind, mode: S.mode, data: data, mat: mat, extra: ex.extra || null, ocr: ex.ocr || null,
-    planText: ex.planText || '', clsNote: ex.cls || null, qa: [], at: nowStamp(),
+    planText: ex.planText || '', clsNote: ex.cls || null, qa: [], at: nowStamp(), lang: getLang(),
     src: { name: S.src.name, size: S.src.size, note: S.src.note || '', kind: S.src.kind },
   };
   S.demo = false;
@@ -1373,9 +1382,70 @@ function finishReport(kind, data, mat, extras) {
   $('#sheet').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+/* ============ 已生成报告的语言切换 ============ */
+const TRANSLATE_LANG_NAME = { en: 'English', sr: 'Serbian (Latin script)' };
+
+async function translateJSONBlob(obj, targetName, signal) {
+  const json = JSON.stringify(obj);
+  const prompt = [
+    'Translate every natural-language string value in the following JSON into ' + targetName + '.',
+    'Rules:',
+    '- Keep every key name exactly as-is (do not translate keys).',
+    '- Keep numbers, units, standard numbers, material grades, codes, G-code/PLC addresses and symbols (\u00d8, k6, GB/T...) unchanged.',
+    '- Keep the JSON structure, array lengths and field presence identical \u2014 only replace the natural-language text inside string values.',
+    '- Output only the translated JSON, no explanation, no markdown fences.',
+    '',
+    'JSON:',
+    '"""',
+    json,
+    '"""',
+  ].join('\n');
+  return await askJSON(prompt, { modelTier: 'default', signal: signal });
+}
+
+async function translateReportContent(targetLang) {
+  const r = S.report;
+  if (!r || S.demo) return;
+  if (r.lang === targetLang) return;
+  if (!S.sample) { toast(t('translate.needApi'), 5000); r.lang = targetLang; return; }
+  if (targetLang === 'zh') { r.lang = targetLang; renderReport(); return; }
+
+  const targetName = TRANSLATE_LANG_NAME[targetLang] || targetLang;
+  const parts = [];
+  if (r.data) parts.push('data');
+  if (r.mat) parts.push('mat');
+  if (r.extra) parts.push('extra');
+  if (r.ocr) parts.push('ocr');
+  if (r.qa && r.qa.length) parts.push('qa');
+  if (!parts.length) { r.lang = targetLang; return; }
+
+  toast(tf('translate.busy', { lang: targetName }));
+  const controller = new AbortController();
+  const cap = (S.limits && S.limits.maxPromptBytes) || 65536;
+  const budget = Math.floor(cap * 0.55);
+  let okCount = 0, skipCount = 0, failCount = 0;
+  for (const key of parts) {
+    const val = r[key];
+    const bytes = bytesOf(JSON.stringify(val));
+    if (bytes > budget) { skipCount++; continue; }
+    try {
+      r[key] = await translateJSONBlob(val, targetName, controller.signal);
+      okCount++;
+    } catch (e) {
+      if (e && e.code === 'cancelled') break;
+      failCount++;
+    }
+  }
+  r.lang = targetLang;
+  renderReport();
+  saveHistory();
+  if (failCount || skipCount) toast(t('translate.fail') + (failCount + skipCount) + '/' + parts.length, 6000);
+  else toast(tf('translate.done', { lang: targetName }));
+}
+
 /* ============ 报告渲染 ============ */
 function reportTitle() {
-  const r = S.report; if (!r) return '未命名';
+  const r = S.report; if (!r) return t('title.untitled');
   if (r.kind === 'code') return (txt(r.data.language) || '设备程序') + ' · ' + (txt(r.data.controller) || '解析');
   const tb = r.data.titleBlock || {};
   return txt(tb.title) || txt(r.data.oneLiner).slice(0, 26) || (r.kind === 'chart' ? '工程图表' : '机械图纸');
@@ -1398,11 +1468,16 @@ function tbl(cols, rows) {
     '</tbody></table></div>';
 }
 
+// 键值对表格：第一列是代码里写死的中文标签（不是 AI 数据），也要跟着 TX() 走
+function kvTbl(colLabels, rows) {
+  return tbl(colLabels.map(h => ({ h: h })), rows.map(r => [TX(r[0])].concat(r.slice(1))));
+}
+
 function riskList(list) {
   return arr(list).map(r => {
     const lv = txt(r.level);
     const cls = /高|critical|high/i.test(lv) ? 'high' : /低|low/i.test(lv) ? 'low' : 'mid';
-    return '<div class="risk ' + cls + '"><div class="risk-h"><span class="pill ' + cls + '">' + esc(lv || '中') + '</span>' +
+    return '<div class="risk ' + cls + '"><div class="risk-h"><span class="pill ' + cls + '">' + esc(TX(lv || '中')) + '</span>' +
       '<span class="risk-t">' + esc(r.item) + '</span></div>' +
       (has(r.why) ? '<div class="risk-b">' + esc(r.why) + '</div>' : '') +
       (has(r.suggestion) ? '<div class="risk-s">' + esc(r.suggestion) + '</div>' : '') + '</div>';
@@ -1435,7 +1510,7 @@ function matCards(mat) {
           (has(m.heatTreatment.hardness) ? '　' + esc(TX('目标硬度：')) + esc(m.heatTreatment.hardness) : '') +
           (has(m.heatTreatment.note) ? '　' + esc(m.heatTreatment.note) : '') + '</p>' : '') +
       (has(pr.machinability) || has(pr.weldability) || has(pr.formability) || has(pr.corrosion)
-        ? sub('工艺性') + tbl([{ h: '项目' }, { h: '评价' }], [
+        ? sub('工艺性') + kvTbl(['项目', '评价'], [
             ['切削加工性', pr.machinability], ['焊接性', pr.weldability],
             ['成形性', pr.formability], ['耐蚀与防护', pr.corrosion]]) : '') +
       (arr(m.cautions).length ? sub('使用注意') + bullets(m.cautions) : '') +
@@ -1517,7 +1592,7 @@ function codeSections(d) {
   out.push(['概览', 'Conspectus', lead(d.oneLiner) + paras(d.summary) +
     chips([d.language, d.dialect, d.controller, env.machineType].filter(has))]);
   out.push(['运行环境与模态', 'Runtime',
-    tbl([{ h: '项目' }, { h: '内容' }], [
+    kvTbl(['项目', '内容'], [
       ['单位制', env.units], ['坐标系 / 工件零点', arr(env.coordinateSystems).join('、')],
       ['加工/插补平面', env.planes], ['模态指令', arr(env.modes).join('、')],
       ['设备类型', env.machineType], ['运行环境', env.runtime]])]);
@@ -1544,7 +1619,7 @@ function chartSections(d, mat) {
   const tb = d.titleBlock || {};
   const out = [];
   out.push(['概览', 'Conspectus', lead(d.oneLiner) + paras(d.summary) + chips(d.keywords) +
-    (has(tb.source) ? '<div class="note-box"><b>数据来源与试验条件：</b>' + esc(tb.source) + '</div>' : '')]);
+    (has(tb.source) ? '<div class="note-box"><b>' + esc(TX('数据来源与试验条件：')) + '</b>' + esc(tb.source) + '</div>' : '')]);
   out.push(['坐标轴与数据系列', 'Axes & Series',
     (arr(d.axes).length ? sub('坐标轴') + tbl([{ h: '轴' }, { h: '物理量' }, { h: '符号', num: true }, { h: '单位', num: true }, { h: '量程', num: true }, { h: '刻度' }, { h: '说明' }],
       arr(d.axes).map(a => [a.axis, a.quantity, a.symbol, a.unit, a.range, a.scale, a.note])) : '') +
@@ -1575,7 +1650,7 @@ function matSection(mat) {
   return matCards(mat) +
     (arr(mat.failureModes).length ? sub('可能的失效模式') + tbl([{ h: '模式' }, { h: '部位' }, { h: '机理' }, { h: '控制措施' }], arr(mat.failureModes).map(f => [f.mode, f.where, f.why, f.control])) : '') +
     (arr(mat.strengthNotes).length ? sub('强度与校核提示') + bullets(mat.strengthNotes) : '') +
-    (has(mat.sourceNote) ? '<div class="note-box"><b>数据性质：</b>' + esc(mat.sourceNote) + '</div>' : '');
+    (has(mat.sourceNote) ? '<div class="note-box"><b>' + esc(TX('数据性质：')) + '</b>' + esc(mat.sourceNote) + '</div>' : '');
 }
 
 function lessonList(list) {
@@ -1588,7 +1663,7 @@ function lessonList(list) {
 function teachSections(e) {
   const out = [];
   out.push(['识图教学 · 怎么一步步看懂', 'How To Read',
-    (has(e.audience) ? '<div class="note-box"><b>适合谁看：</b>' + esc(e.audience) + '</div>' : '') +
+    (has(e.audience) ? '<div class="note-box"><b>' + esc(TX('适合谁看：')) + '</b>' + esc(e.audience) + '</div>' : '') +
     lessonList(e.readingOrder) +
     (arr(e.keySymbols).length ? sub('符号与代号讲解') + tbl([{ h: '符号', num: true }, { h: '怎么念' }, { h: '含义' }, { h: '本图实例' }, { h: '出处标准', num: true }],
       arr(e.keySymbols).map(x => [x.symbol, x.readAs, x.meaning, x.example, x.standard])) : '')]);
@@ -1611,13 +1686,13 @@ function engSections(e, kind) {
   const opt = arr(e.optimizations).map(o => {
     const lv = txt(o.priority || o.effort);
     const cls = /高|high/i.test(lv) ? 'high' : /低|low/i.test(lv) ? 'low' : 'mid';
-    return '<div class="risk ' + cls + '"><div class="risk-h"><span class="pill ' + cls + '">' + esc(lv || '中') + '</span>' +
-      '<span class="risk-t">' + esc(o.target) + '</span>' + (has(o.effort) ? '<span class="chip">投入 ' + esc(o.effort) + '</span>' : '') + '</div>' +
-      (has(o.current) ? '<div class="risk-b"><b>现状：</b>' + esc(o.current) + '</div>' : '') +
+    return '<div class="risk ' + cls + '"><div class="risk-h"><span class="pill ' + cls + '">' + esc(TX(lv || '中')) + '</span>' +
+      '<span class="risk-t">' + esc(o.target) + '</span>' + (has(o.effort) ? '<span class="chip">' + esc(TX('投入')) + ' ' + esc(o.effort) + '</span>' : '') + '</div>' +
+      (has(o.current) ? '<div class="risk-b"><b>' + esc(TX('现状：')) + '</b>' + esc(o.current) + '</div>' : '') +
       (has(o.proposal) ? '<div class="risk-s">' + esc(o.proposal) + '</div>' : '') +
       (has(o.benefit) || has(o.cost) ? '<div class="risk-b" style="margin-top:5px">' +
-        (has(o.benefit) ? '<b>收益：</b>' + esc(o.benefit) + '　' : '') +
-        (has(o.cost) ? '<b>代价：</b>' + esc(o.cost) : '') + '</div>' : '') + '</div>';
+        (has(o.benefit) ? '<b>' + esc(TX('收益：')) + '</b>' + esc(o.benefit) + '　' : '') +
+        (has(o.cost) ? '<b>' + esc(TX('代价：')) + '</b>' + esc(o.cost) : '') + '</div>' : '') + '</div>';
   }).join('');
   out.push(['优化分析', 'Optimization', opt +
     (arr(e.dfm).length ? sub(kind === 'code' ? '可维护性问题' : '可制造性 / 可装配性') + tbl([{ h: '问题' }, { h: '影响' }, { h: '建议' }], arr(e.dfm).map(x => [x.issue, x.impact, x.fix])) : '') +
@@ -1627,8 +1702,8 @@ function engSections(e, kind) {
     tbl([{ h: '项目' }, { h: '方法/公式' }, { h: '需要的输入' }, { h: '判据' }], arr(e.calculations).map(x => [x.item, x.formula, x.input, x.criterion]))]);
   const v = e.verification || {};
   out.push([kind === 'code' ? '试运行与验证流程' : '验证与试验流程', 'Verification',
-    (has(v.objective) ? '<div class="note-box"><b>验证目标：</b>' + esc(v.objective) + '</div>' : '') +
-    (has(v.specimens) || arr(v.equipment).length ? tbl([{ h: '项目' }, { h: '内容' }], [
+    (has(v.objective) ? '<div class="note-box"><b>' + esc(TX('验证目标：')) + '</b>' + esc(v.objective) + '</div>' : '') +
+    (has(v.specimens) || arr(v.equipment).length ? kvTbl(['项目', '内容'], [
       ['试件 / 样件', v.specimens], ['设备与工装', arr(v.equipment).join('、')], ['周期估计', v.schedule]]) : '') +
     (arr(v.steps).length ? sub('执行步骤') + tbl([{ h: '#', num: true }, { h: '操作' }, { h: '参数/工况', num: true }, { h: '记录项' }, { h: '合格判据' }],
       arr(v.steps).map((x, i) => [x.no || (i + 1), x.action, x.condition, x.record, x.criterion])) : '') +
@@ -1645,11 +1720,11 @@ function ocrSections(o) {
   const items = arr(o.items).slice(0, 320);
   return [['图面文字转写', 'Transcription',
     (arr(o.titleBlock).length ? sub('标题栏原文') + tbl([{ h: '栏目' }, { h: '内容' }], arr(o.titleBlock).map(x => [x.field, x.value])) : '') +
-    (items.length ? sub('图面标注逐条抄录（共 ' + arr(o.items).length + ' 条）') +
+    (items.length ? sub(tf('ocr.itemsCount', { n: arr(o.items).length })) +
       tbl([{ h: '类别' }, { h: '位置' }, { h: '原样文字', num: true }], items.map(x => [x.kind, x.zone, x.text])) : '') +
     (arr(o.technicalNotes).length ? sub('技术要求原文') + flow(o.technicalNotes) : '') +
     (arr(o.unclear).length ? sub('未能辨认') + tbl([{ h: '位置' }, { h: '内容' }, { h: '原因' }], arr(o.unclear).map(x => [x.zone, x.what, x.why])) : '') +
-    (has(o.coverage) ? '<div class="note-box"><b>转写完整度自评：</b>' + esc(o.coverage) + '</div>' : '')]];
+    (has(o.coverage) ? '<div class="note-box"><b>' + esc(TX('转写完整度自评：')) + '</b>' + esc(o.coverage) + '</div>' : '')]];
 }
 
 function glossary(g) {
@@ -1711,6 +1786,498 @@ function renderPresets() {
 }
 
 /* ============ 示例报告（页面初始状态，非用户数据） ============ */
+const EX_I18N = { en: {}, sr: {} };
+
+EX_I18N.en.drawing = {
+  docType: 'Part drawing', confidence: 88,
+  titleBlock: { title: 'Output Shaft', drawingNo: 'JSD-04-02', scale: '1:2', projection: 'First-angle', material: '40Cr', quantity: '1', unit: 'mm', standard: 'GB/T 1800.2-2020, GB/T 1184-1996', revision: 'B', org: 'Example drawing', date: '—' },
+  oneLiner: 'Low-speed output shaft of a two-stage helical gear reducer: carries torque from the large gear through a parallel key to the coupling, while rolling bearings at both ends take the radial load.',
+  summary: 'A typical stepped-shaft part drawing, shown with one principal view (axis horizontal), two removed sections and one detail view.\nSeven steps grow from both ends toward the middle, forming shoulders that locate the gear and bearings axially; the largest Ø60 step carries the large gear, the Ø55 steps on either side carry tapered roller bearings, and the Ø45 extension connects to the coupling.\nThe technical requirements focus on three points: 0.025 circular runout of both bearing seats to a common datum, 0.02 keyway symmetry, and Ra0.4 on the seal journal.\nMaterial 40Cr, through-hardened and tempered to HB241–286, delivered ground.',
+  keywords: ['Stepped shaft', '40Cr Q&T', 'Parallel key', 'Tapered roller bearing', 'Shoulder location', 'H7/k6', 'Runout 0.025', 'Grinding relief groove'],
+  views: [
+    { name: 'Principal view (axis horizontal)', type: 'Basic view', describes: 'Axial dimension chain of the seven steps, diameters, chamfers, grinding relief grooves and the threaded end' },
+    { name: 'Removed section A–A', type: 'Removed section', describes: 'Keyway 14N9 on the Ø45 coupling step, depth t=5.5' },
+    { name: 'Removed section B–B', type: 'Removed section', describes: 'Keyway 18N9 on the Ø60 gear seat, depth t=7.0' },
+    { name: 'Detail I, 5:1', type: 'Detail view', describes: 'Shoulder fillet R2 and grinding relief groove 2×0.5' },
+  ],
+  components: [],
+  features: [
+    { name: 'Shoulder Ø68', spec: '4mm high', purpose: 'Axial locating face for the gear and bearing inner ring; takes axial force and fixes assembly position' },
+    { name: 'Grinding relief groove', spec: '2×0.5', purpose: 'Lets the grinding wheel run out so the root is not left with a step and stress concentration' },
+    { name: 'Keyways', spec: '18N9×7.0 / 14N9×5.5', purpose: 'Transmit torque through standard parallel keys; N9 is the tighter tolerance class' },
+    { name: 'Center holes', spec: 'B3.15/10 GB/T 145', purpose: 'Common locating datum for turning and grinding, and for re-centering during repair' },
+    { name: 'Chamfers', spec: 'C2 / C1.5', purpose: 'Ease pressing on bearings and gear, remove burrs, protect fit surfaces during assembly' },
+    { name: 'Fillets', spec: 'R2', purpose: 'Reduce stress concentration at the shoulders — key to fatigue life' },
+    { name: 'Lock thread', spec: 'M36×1.5-6g', purpose: 'Round nut with tab washer locks the bearing inner ring' },
+  ],
+  principle: {
+    designIntent: 'The shaft follows the "thick in the middle, thin at the ends" equal-strength layout: bending moment peaks at the gear, so the Ø60 step is largest; stepping down toward both ends lets parts slide on from either side and gives each part its own axial locating face. Fit classes follow the usual convention — k6 for bearing inner rings, r6 for the gear, m6 for the coupling — so torque is carried by interference and key together.',
+    workingPrinciple: 'After two gear stages reduce motor speed, torque passes from the large gear hub through the 18N9 key into the Ø60 step. The shaft sits in tapered roller bearings at both ends: radial force goes through the bearings into the housing, axial force is taken by the shoulder and the round nut. Torque leaves through the Ø45 extension and the coupling. The Ø50 step runs against a lip seal to keep lubricant in the housing.',
+    motionFlow: ['Large gear hub', '18N9 key', 'Ø60 step', 'Shaft body', 'Ø45 extension key joint', 'Coupling', 'Driven machine'],
+    loadPath: ['Gear mesh force', 'Key and interference fit surfaces', 'Combined bending–torsion section', 'Bearing seats Ø55k6 at both ends', 'Bearings', 'Housing bores'],
+  },
+  dimensions: [
+    { feature: 'Bearing seats (2)', nominal: 'Ø55', tolerance: 'k6 (+0.021/+0.002)', fit: 'With P0-class bearing inner ring', note: 'Transition fit biased to interference, stops the inner ring creeping' },
+    { feature: 'Gear seat', nominal: 'Ø60', tolerance: 'r6 (+0.060/+0.041)', fit: 'H7/r6', note: 'Interference fit, shares torque with the key' },
+    { feature: 'Coupling step', nominal: 'Ø45', tolerance: 'm6 (+0.025/+0.009)', fit: 'H7/m6', note: 'Transition fit for easy removal' },
+    { feature: 'Seal journal', nominal: 'Ø50', tolerance: 'h9 (0/−0.062)', fit: 'With lip seal', note: 'Loose size tolerance; sealing relies on roughness and roundness' },
+    { feature: 'Shoulder', nominal: 'Ø68', tolerance: 'General tolerance GB/T 1804-m', fit: '—', note: 'Locating face; squareness controlled indirectly by runout' },
+    { feature: 'Keyway width (Ø60 step)', nominal: '18', tolerance: 'N9 (0/−0.043)', fit: 'Tight parallel-key joint', note: 'Depth t=7.0, measured as Ø60−t' },
+    { feature: 'Overall length', nominal: '452', tolerance: '±0.5', fit: '—', note: 'Both end faces are grinding datums' },
+  ],
+  gdt: [
+    { symbol: 'Circular runout', feature: 'Ø60 gear seat', value: '0.025', datum: 'Common datum A–B', meaning: 'Limits wobble of the gear seat relative to the bearing axis; directly affects mesh accuracy and noise' },
+    { symbol: 'Circular runout', feature: 'Ø50 seal journal', value: '0.04', datum: 'A–B', meaning: 'Excess runout periodically lifts the seal lip and causes leaks' },
+    { symbol: 'Symmetry', feature: 'Keyway center plane', value: '0.02', datum: 'Ø45 axis', meaning: 'Loads both key flanks evenly and prevents one-sided crushing' },
+    { symbol: 'Parallelism', feature: 'Keyway side faces', value: '0.02/100', datum: 'Axis', meaning: 'Stops the key from sitting skewed and binding' },
+  ],
+  surfaces: [
+    { feature: 'Bearing seat Ø55k6', roughness: 'Ra 0.8', process: 'Grinding' },
+    { feature: 'Gear seat Ø60r6', roughness: 'Ra 0.8', process: 'Grinding' },
+    { feature: 'Seal journal Ø50', roughness: 'Ra 0.4', process: 'Grinding, then non-directional polishing' },
+    { feature: 'Keyway sides', roughness: 'Ra 3.2', process: 'End milling or slotting' },
+    { feature: 'Non-fit diameters and faces', roughness: 'Ra 6.3', process: 'Turning' },
+  ],
+  manufacturing: {
+    blank: 'Hot-rolled bar Ø70×460; for volume production use closed-die forgings so grain flow runs along the axis for better fatigue strength',
+    processes: ['Cut stock Ø70×460', 'Rough-face both ends, drill center holes B3.15/10', 'Rough-turn all diameters, 2.5mm stock per side', 'Quench & temper: 850℃ oil quench + 520℃ temper, HB241–286', 'Lap center holes', 'Semi-finish turn with 0.4mm grinding stock, cut relief grooves and chamfers', 'Mill (slot) both keyways', 'Turn M36×1.5 thread', 'Deburr, clean, straighten', 'Grind Ø55k6, Ø60r6, Ø50 and locating faces', 'Final inspection and rust-proof packing'],
+    heatTreatment: 'Through Q&T to HB241–286; for dusty or high-speed service, induction-harden the Ø50 seal journal to HRC45–50, case depth 1.0–1.5mm',
+    keyDifficulties: ['0.025 runout of both bearing seats to a common datum — must be ground in one setup between centers', '0.02 keyway symmetry needs an indexing fixture or careful indicating', 'Shoulder fillets R2 and relief grooves are fatigue-critical — no tool marks, dents or sharp corners allowed'],
+    inspection: ['Diameters by outside micrometer with inductive gauge spot checks', 'Runout on a bench center with indicator, located on both center holes (or V-blocks)', 'Keyway width by plug gauge, symmetry by indicator flip method', 'Roughness by profilometer or comparison specimens', 'After Q&T, hardness and metallography sampled per furnace batch'],
+  },
+  applications: ['Low-speed (output) shaft of general two-stage helical gear reducers', 'Drives for belt conveyors and scraper conveyors', 'Continuous medium-duty drives such as mixers and crane travel mechanisms'],
+  roleInSystem: 'It is the last link of torque output in the reducer: a transmission part (carries all output torque), a support part (hands gear mesh forces to the housing) and a sealing interface (Ø50 step against the lip seal). If its runout or surface quality is out of spec, three failures show up together: higher gear noise, early bearing failure and oil leaks at the end cover.',
+  materialsSeen: ['40Cr'],
+  risks: [
+    { level: 'High', item: 'Stress concentration at keyway ends and shoulder fillets', why: 'The shaft sees fully reversed bending; a sharp-cornered fillet can raise the effective stress concentration factor from 1.6 to over 2.5 and cut fatigue limit by 30%+', suggestion: 'Hold R2 fillets and polish them, check with radius gauges; use round-end (disc-milled) keyways instead of square ends' },
+    { level: 'Medium', item: 'Ø60r6 and Ø55k6 are interference-side fits; cold pressing scores the surfaces', why: 'Scoring during pressing both reduces interference and creates fatigue origins', suggestion: 'Shrink-fit gear and bearings after induction or oil-bath heating to 80–100℃; no hammering' },
+    { level: 'Medium', item: 'Spiral machining lay left on the seal journal', why: 'A spiral lay pumps oil out like a screw, causing persistent seepage', suggestion: 'Polish circumferentially after grinding for a non-directional lay, Ra≤0.4' },
+    { level: 'Low', item: 'No dynamic balancing requirement on the drawing', why: 'Above 1500 r/min, unbalance will increase bearing vibration', suggestion: 'Add a balancing grade (e.g. G6.3) to the technical requirements' },
+  ],
+  improvements: ['For high volumes, replace the Ø60 keyed joint with an involute spline or a locking assembly to remove keyway stress concentration and improve centering', 'Roll-burnish the shoulder fillets and keyway ends; fatigue life typically improves 30–60%', 'State "keep center holes" (GB/T 145 B3.15/10) in the technical requirements so the part can be re-centered for repair', 'Show the general dimensional and geometric tolerance classes together near the title block to cut shop-floor questions'],
+  uncertainties: ['The revision record at the lower right of the title block (changes in revision B) is illegible', 'Part of technical requirement 3 on the scope of induction hardening is blurred; cannot confirm whether it is mandatory', 'No explicit rule for post-heat-treatment straightening allowance or magnetic particle inspection acceptance level'],
+  glossary: [
+    { term: 'k6', meaning: 'Shaft tolerance zone for a transition fit in the hole-basis system; the usual fit for rolling-bearing inner rings' },
+    { term: 'N9', meaning: 'Keyway width tolerance class for a tight standard parallel-key joint' },
+    { term: '⌀ / Ø', meaning: 'Diameter symbol' },
+    { term: 'Circular runout', meaning: 'Maximum indicator variation while the feature rotates once about the datum axis' },
+    { term: 'Ra 0.8', meaning: 'Arithmetic mean roughness 0.8 μm, a common ground finish' },
+    { term: 'C2', meaning: '45° chamfer, 2mm axial length' },
+    { term: '2×0.5', meaning: 'Grinding relief groove: 2mm wide, 0.5mm deep' },
+    { term: 'B3.15/10', meaning: 'Type B center hole per GB/T 145, pilot Ø3.15, countersink Ø10' },
+    { term: 'GB/T 1804-m', meaning: 'Medium class of general linear tolerances' },
+  ],
+};
+
+EX_I18N.en.material = {
+  materials: [{
+    grade: '40Cr', standard: 'GB/T 3077-2015', category: 'Alloy structural steel (chromium steel)',
+    equivalents: [{ system: 'AISI/SAE', grade: '5140' }, { system: 'DIN/EN', grade: '41Cr4 (1.7035)' }, { system: 'JIS', grade: 'SCr440' }, { system: 'ISO', grade: '41Cr4' }, { system: 'UNS', grade: 'G51400' }],
+    composition: [
+      { element: 'C Carbon', range: '0.37 ~ 0.44' }, { element: 'Si Silicon', range: '0.17 ~ 0.37' },
+      { element: 'Mn Manganese', range: '0.50 ~ 0.80' }, { element: 'Cr Chromium', range: '0.80 ~ 1.10' },
+      { element: 'P Phosphorus', range: '≤ 0.035' }, { element: 'S Sulfur', range: '≤ 0.035' },
+    ],
+    mechanical: [
+      { property: 'Tensile strength Rm', value: '≥ 980', unit: 'MPa', condition: '850℃ oil quench + 520℃ temper, Ø25 specimen' },
+      { property: 'Lower yield strength ReL', value: '≥ 785', unit: 'MPa', condition: 'Same as above' },
+      { property: 'Elongation A', value: '≥ 9', unit: '%', condition: 'Same as above' },
+      { property: 'Reduction of area Z', value: '≥ 45', unit: '%', condition: 'Same as above' },
+      { property: 'Impact energy KU2', value: '≥ 47', unit: 'J', condition: 'Same as above' },
+      { property: 'Hardness after Q&T', value: '241 ~ 286', unit: 'HBW', condition: 'Per this drawing' },
+      { property: 'Bending fatigue limit σ₋₁', value: 'approx. 350 ~ 420', unit: 'MPa', condition: 'Fully reversed, smooth specimen; confirm by test' },
+    ],
+    physical: [
+      { property: 'Density', value: '7.85', unit: 'g/cm³', condition: '20℃' },
+      { property: 'Elastic modulus E', value: '211', unit: 'GPa', condition: '20℃' },
+      { property: 'Poisson’s ratio μ', value: '0.28', unit: '—', condition: '20℃' },
+      { property: 'Thermal conductivity', value: '44', unit: 'W/(m·K)', condition: '100℃' },
+      { property: 'Thermal expansion coefficient', value: '11.6', unit: '×10⁻⁶/K', condition: '20 ~ 100℃' },
+    ],
+    heatTreatment: { route: 'Normalize 850–870℃ air cool → Q&T: 850℃±10℃ oil quench + 500–540℃ temper', hardness: 'HB 241–286 (≈ Rm 820–950 MPa)', note: 'Cool quickly through 400–500℃ after tempering to avoid temper embrittlement; straighten after Q&T and stress-relieve at 200℃×2h' },
+    processability: {
+      machinability: 'Moderate in Q&T condition (HB≤286), about 85% of 45 steel; carbide tools, vc 80–120 m/min',
+      weldability: 'Poor, carbon equivalent ≈0.72%; preheat 200–300℃, stress-relieve 600–650℃ after welding; weld repair not recommended for shafts',
+      formability: 'Good hot formability: start forging 1150–1200℃, finish ≥800℃; poor cold formability',
+      corrosion: 'Poor corrosion resistance; black-oxide or oil non-working surfaces, phosphate or zinc-plate in humid service',
+    },
+    whyChosen: 'The output shaft carries alternating combined bending and torsion, needing good overall mechanical properties and some hardenability. 40Cr after Q&T reliably reaches HB241–286 and ≥785 MPa yield below Ø60, with fatigue strength about 20–30% above 45 steel at far lower cost than 42CrMo — the standard choice for medium-duty reducer shafts.',
+    cautions: ['Hardenability is insufficient above Ø80 and core properties drop — use 42CrMo instead', 'Susceptible to temper embrittlement; cool quickly after tempering', 'Tool marks at keyways and fillets sharply reduce fatigue life; roughness must be met', 'If induction hardening is added, keep the soft zone away from the maximum bending section'],
+    alternatives: [
+      { grade: '45 steel', tradeoff: 'About 20% cheaper and easier to machine, but lower fatigue strength and hardenability; only for light loads or large low-speed shafts' },
+      { grade: '42CrMo', tradeoff: 'Better hardenability and hot strength, suits sections above Ø80 or heavy shock loads; about 30% more expensive, slightly harder to machine' },
+      { grade: '20CrMnTi carburized', tradeoff: 'Surface HRC58–62 with far better wear resistance, but needs carburizing and grinding-stock control; larger heat-treatment distortion' },
+      { grade: 'QT600-3 ductile iron', tradeoff: 'Good damping and low cost, but insufficient strength and impact toughness; only for low-speed light loads or cast sleeve designs' },
+    ],
+  }],
+  failureModes: [
+    { mode: 'Bending fatigue fracture', where: 'Keyway ends, R2 shoulder fillets', why: 'Alternating bending initiates cracks at stress raisers that grow over time; fracture surface shows beach marks', control: 'Hold fillet radius and roughness, use round-end keyways, roll-burnish if needed' },
+    { mode: 'Fretting wear (fretting fatigue)', where: 'Ø60 gear seat and Ø55 bearing seats', why: 'With too little interference, micro-slip at the fit produces reddish-brown debris and starts cracks', control: 'Ensure interference and clean assembly; tighten the fit class if needed' },
+    { mode: 'Torsional plastic deformation', where: 'Ø45 coupling step (smallest section)', why: 'Peak torque at start-up shock or machine stall exceeds yield', control: 'Check against peak torque and fit a safety coupling or torque limiter' },
+    { mode: 'Grooving at the seal', where: 'Ø50 journal', why: 'Long-term rubbing of the seal lip with contaminant particles', control: 'Induction-harden or hard-chrome, keep Ra ≤ 0.4, add a dust lip' },
+  ],
+  strengthNotes: [
+    'Check critical sections for combined bending and torsion: Ø55/Ø60 shoulder transitions and both keyway sections',
+    'Check torque capacity of the gear interference fit; choose interference per GB/T 5371 and actual temperature rise',
+    'Fatigue safety factor from σ₋₁ and effective stress concentration factor kσ; typically S ≥ 1.5',
+    'Stiffness: maximum deflection between bearings ≤ 0.0003L, slope at the gear ≤ 0.001 rad',
+  ],
+  sourceNote: 'Mechanical and physical properties are GB/T 3077-2015 specified values for Ø25mm specimens plus typical handbook values. Real parts are weaker than specimens due to size effect; use supplier certificates and measured data for design checks and acceptance.',
+};
+
+EX_I18N.en.ocr = {
+  titleBlock: [
+    { field: 'Title', value: 'Output Shaft' }, { field: 'Drawing No.', value: 'JSD-04-02' },
+    { field: 'Scale', value: '1:2' }, { field: 'Material', value: '40Cr' },
+    { field: 'Qty', value: '1' }, { field: 'Revision', value: 'B' },
+  ],
+  items: [
+    { zone: 'Tile 1 (row 1, col 1) left end', kind: 'Dimension', text: 'Ø45 m6 (+0.025/+0.009)' },
+    { zone: 'Tile 2 (row 1, col 2) middle', kind: 'Dimension', text: 'Ø55 k6 (+0.021/+0.002)' },
+    { zone: 'Tile 2 (row 1, col 2) middle', kind: 'Dimension', text: 'Ø60 r6 (+0.060/+0.041)' },
+    { zone: 'Tile 3 (row 1, col 3) right end', kind: 'Dimension', text: 'M36×1.5-6g' },
+    { zone: 'Tile 2 top', kind: 'Geometric tolerance', text: '⌰ | 0.025 | A–B' },
+    { zone: 'Tile 4 (row 2, col 1)', kind: 'Geometric tolerance', text: '= | 0.02 | A' },
+    { zone: 'Tile 2 top', kind: 'Roughness', text: 'Ra 0.8' },
+    { zone: 'Tile 5 (row 2, col 2)', kind: 'Roughness', text: 'Ra 0.4' },
+    { zone: 'Tile 4, section A–A', kind: 'Dimension', text: '14 N9 (0/−0.043), t = 5.5' },
+    { zone: 'Tile 5, section B–B', kind: 'Dimension', text: '18 N9 (0/−0.043), t = 7.0' },
+    { zone: 'Tile 1 bottom', kind: 'Dimension', text: '452 ±0.5 (overall length)' },
+    { zone: 'Tile 3, detail I', kind: 'Note', text: 'I  5:1   R2   2×0.5' },
+    { zone: 'Tile 6 (row 2, col 3)', kind: 'View label', text: 'A–A    B–B' },
+    { zone: 'Tile 1 left end face', kind: 'Note', text: 'Center holes B3.15/10 GB/T 145 (both ends)' },
+  ],
+  technicalNotes: [
+    'Quench and temper to HB241–286.',
+    'Unspecified chamfers C1.5, unspecified fillets R2.',
+    'General linear tolerances per GB/T 1804-m; general geometric tolerances per GB/T 1184-K.',
+    'Deburr and break sharp edges; no cracks, laps or similar defects after machining.',
+  ],
+  unclear: [
+    { zone: 'Title block, lower right', what: 'Change description for revision B', why: 'Fold crease in the original; strokes run together' },
+    { zone: 'End of technical requirement 3', what: 'Scope of induction hardening', why: 'Faint print; last few characters illegible' },
+  ],
+  coverage: 'Title block, main dimensions, geometric tolerances and technical requirements fully transcribed; the revision record and two blurred passages could not be confirmed and are listed as illegible.',
+};
+EX_I18N.en.meta = {
+  planText: 'Tiles 3×2, 7 images sent\nDetail magnified 2.4× vs. overview, at native resolution',
+  planNote: '(example values — recalculated from the real resolution once you drop a file)',
+  at: 'Example data',
+  srcName: 'Example · reducer output shaft part drawing',
+  srcMeta: [['Drawing', 'Reducer output shaft JSD-04-02'], ['Material', '40Cr Q&T HB241–286'], ['Status', 'Built-in example, replaced when you drop a file']],
+  svgLabel: 'Example: stepped shaft sketch',
+  pdfCaption: 'Example sketch · stepped shaft',
+  qa: [{
+    q: 'Why are both bearing seats controlled for runout against a common datum A–B?',
+    a: 'Because the shaft ultimately rotates on the two bearings in the housing: what decides whether the gear runs true is the axis defined jointly by both bearing seats, not any single diameter.\nIf only one end were the datum, errors at the other end would be magnified at the gear seat, showing up after assembly as gear face wobble, mesh noise and bearing heat.\nThe common datum A–B also has a process meaning: inspection must support the part on two V-blocks or two centers and indicate it, matching how it is actually supported in the housing — only then are the measured values meaningful.',
+  }],
+};
+
+EX_I18N.en.eng = {
+  optimizations: [
+    { target: 'Structure · Ø60 keyed joint', current: 'Single key carries torque; the keyway end is the worst stress raiser on the whole shaft and most fatigue cracks start there', proposal: 'Replace with an involute spline (e.g. INV 28×1.5×18×7H/7e) or a locking assembly (e.g. type Z2), removing the keyway', benefit: 'Effective stress concentration factor drops from ≈2.1 to 1.3–1.5, fatigue life typically +30–60%; better centering and lower gear noise', cost: 'Spline needs a dedicated hob or shaper, unit cost ≈+15%; a locking assembly needs a larger hub', effort: 'Medium', priority: 'High' },
+    { target: 'Process · shoulder fillets and relief grooves', current: 'Only R2 and 2×0.5 specified, no surface strengthening', proposal: 'Roll-burnish both shoulder fillets and keyway ends (800–1200 N for Ø60, feed 0.15 mm/r, 2 passes)', benefit: '0.3–0.6 mm compressive residual stress layer; bending fatigue limit +20–40%', cost: 'One extra operation, ≈1.5 min per part, needs a burnishing tool', effort: 'Low', priority: 'High' },
+    { target: 'Tolerance · Ø50 seal journal', current: 'h9 with Ra0.4, no lay direction or hardness specified', proposal: 'Add "non-directional polish after grinding, no spiral lay" and, depending on service, induction harden to HRC45–50', benefit: 'Eliminates the most common end-cover seepage complaint; hardening greatly delays seal grooving', cost: 'Induction hardening adds equipment and inspection cost, ≈¥8 per part', effort: 'Low', priority: 'Medium' },
+    { target: 'Blank · stock method', current: 'Hot-rolled bar Ø70×460 with heavy turning allowance', proposal: 'Above 500 pcs switch to closed-die forgings, forging ratio ≥3, grain flow along the axis', benefit: 'Material yield from ≈45% to over 70%, fatigue strength a further +10–20%', cost: 'Tooling needed; unit cost must be amortized over batch size', effort: 'High', priority: 'Medium' },
+  ],
+  dfm: [
+    { issue: 'Both bearing seats need 0.025 runout to a common datum, but the drawing does not say whether center holes are kept', impact: 'If the shop removes the center holes after finish turning, the part cannot be ground between centers and runout is hard to hold', fix: 'State "keep GB/T 145 B3.15/10 center holes, do not remove" in the technical requirements' },
+    { issue: 'Keyway symmetry 0.02 has no defined way of establishing the datum', impact: 'Different crews indicate differently and re-inspection results conflict', fix: 'Note "datum from both center holes, measured on V-blocks by indicator"' },
+    { issue: 'M36×1.5 thread sits next to the Ø55k6 bearing seat with no thread undercut', impact: 'Thread runout can intrude on the bearing seat and jam assembly', fix: 'Add a 3×1 undercut or specify the thread runout length' },
+  ],
+  toleranceStack: [
+    { chain: 'Gear axial location: shoulder face → gear hub → spacer → bearing inner ring', concern: 'Accumulated length tolerances can leave more than 0.1 mm axial play between gear and bearing', action: 'Dimension the locating chain from one datum and run a stack-up on overall length and shoulder position' },
+    { chain: 'Ø60r6 interference vs. gear bore H7', concern: 'At the minimum interference of 0.020 mm, friction torque may not carry peak torque, causing fretting', action: 'Calculate minimum interference per GB/T 5371; move to s6 or lengthen the fit if needed' },
+  ],
+  calculations: [
+    { item: 'Combined bending–torsion strength at critical sections', formula: 'σca = √(σb² + 4τ²) ≤ [σ-1], at the Ø55/Ø60 shoulder and keyway sections', input: 'Output torque T, gear pitch diameter, bearing span, radial and axial forces', criterion: 'Safety factor S ≥ 1.5' },
+    { item: 'Fatigue strength check', formula: 'Sσ = σ-1 /(kσ·σa/εσ/β + ψσ·σm)', input: 'σ-1 ≈ 350–420 MPa, effective stress concentration factor kσ, size factor εσ, surface factor β', criterion: 'Sσ ≥ 1.5, computed separately at fillets and keyways' },
+    { item: 'Torque capacity of the interference fit', formula: 'Mf = π·d²·L·p·f/2', input: 'Contact pressure p at minimum interference, friction f 0.12–0.15, fit length L', criterion: 'Mf ≥ 1.5 × rated torque' },
+    { item: 'Shaft stiffness and deflection', formula: 'Deflection y and slope θ at the gear by superposition on a simply supported beam', input: 'E=211 GPa, second moments of each step, load distribution', criterion: 'y ≤ 0.0003L, θ ≤ 0.001 rad' },
+  ],
+  verification: {
+    objective: 'Verify fatigue life, fit reliability and sealing under rated and overload conditions, and confirm the drawing tolerances and heat treatment support the design life',
+    specimens: '6 production shafts from the same Q&T batch (3 full-shaft fatigue, 2 sectioned for metallography and hardness, 1 spare), plus 3 standard Ø10 tensile specimens',
+    equipment: ['Servo-hydraulic fatigue rig (≥100 kN·m torsion or ±50 kN bending)', 'Bench center with inductive gauge (1 μm resolution)', 'Profilometer (Ra range 0.05–10 μm)', 'Rockwell/Brinell hardness tester', 'Metallurgical microscope', 'Magnetic particle inspection unit', 'Seal test rig (temperature and speed control)'],
+    steps: [
+      { no: 1, action: 'Incoming and geometric re-inspection', condition: 'Room temperature 20±5℃', record: 'Step diameters, runout, keyway symmetry, roughness', criterion: 'All per drawing, runout ≤0.025' },
+      { no: 2, action: 'Q&T quality confirmation', condition: 'Sampled per furnace batch', record: 'Surface and core hardness, microstructure, decarburization depth', criterion: 'HB241–286, tempered sorbite, decarburization ≤0.1 mm' },
+      { no: 3, action: 'Magnetic particle inspection', condition: 'Circular and longitudinal magnetization', record: 'Defect location and size', criterion: 'No linear indications at fillets or keyways' },
+      { no: 4, action: 'Rotating bending fatigue test', condition: 'One shaft each at 1.0 / 1.2 / 1.4 × rated stress amplitude, 3000 r/min', record: 'Cycles, crack initiation site, fracture appearance', criterion: '≥1×10⁷ cycles without failure at rated load' },
+      { no: 5, action: 'Interference fit assembly and teardown', condition: 'Gear heated to 90±10℃ and shrunk on, disassembled after 100 h running', record: 'Press force, fretting marks, actual interference', criterion: 'No reddish-brown debris, scoring ≤2% of fit area' },
+      { no: 6, action: 'Seal rig test', condition: 'Ø50 journal, 1500 r/min, oil 80℃, 500 h continuous', record: 'Leakage, journal wear depth, seal lip condition', criterion: 'No visible leakage, journal wear ≤0.02 mm' },
+    ],
+    measurements: [
+      { item: 'Runout of both bearing seats to common datum', method: 'Between centers + dial indicator', tolerance: '≤0.025 mm' },
+      { item: 'Keyway symmetry', method: 'V-block + indicator flip method', tolerance: '≤0.02 mm' },
+      { item: 'Seal journal roughness and lay', method: 'Profilometer + 30× microscope', tolerance: 'Ra ≤0.4 μm, no spiral lay' },
+      { item: 'Q&T hardness', method: 'Brinell tester, 3 points each at end face and middle', tolerance: 'HB 241–286' },
+      { item: 'Fit interference', method: 'Measure shaft and bore separately before assembly, take the difference', tolerance: 'Within the Ø60 H7/r6 calculated range' },
+    ],
+    safety: ['Guard the fatigue test area — specimens can eject at fracture', 'Use heat-resistant gloves and a dedicated lifting tool for shrink fitting; never steady the gear by hand', 'Provide pressure relief and a drip tray on the hot oil circuit of the seal rig; no open flames in the test area'],
+    schedule: 'Geometry and material checks 1 week; fatigue tests 3–5 weeks (cycle-driven); seal rig 3 weeks; can run in parallel for ≈6 weeks total with 2 technicians',
+  },
+  costNotes: [
+    'Material is ≈35% of unit cost, machining ≈45%, heat treatment ≈12%; focus optimization on cutting grinding time rather than changing material',
+    'Below 200 pcs bar stock is still cheapest; above 500 pcs forgings win on total cost',
+  ],
+  standardsToCheck: [
+    { standard: 'GB/T 1800.2-2020', clause: 'Limit deviation tables for k6 / r6 / m6', why: 'Confirm the deviations on the drawing match the standard' },
+    { standard: 'GB/T 1095-2003 / GB/T 1096-2003', clause: 'Parallel key and keyway dimensions and tolerances', why: 'Confirm 18N9 and 14N9 widths and depths match the key fit type' },
+    { standard: 'GB/T 3077-2015', clause: '40Cr mechanical properties and delivery condition', why: 'Confirm the Q&T hardness range and size-effect correction' },
+  ],
+  openIssues: [
+    'Actual torque spectrum and start-up shock factor are unknown and directly affect the fatigue conclusion — request the load spectrum from the OEM',
+    'Whether induction hardening is mandatory is unclear from the blurred text; the designer must confirm',
+    'No corrosion protection or coating requirement for non-working surfaces is shown',
+  ],
+};
+
+EX_I18N.sr.drawing = {
+  docType: 'Radionički crtež', confidence: 88,
+  titleBlock: { title: 'Izlazno vratilo', drawingNo: 'JSD-04-02', scale: '1:2', projection: 'Evropska (prvi ugao)', material: '40Cr', quantity: '1', unit: 'mm', standard: 'GB/T 1800.2-2020, GB/T 1184-1996', revision: 'B', org: 'Primer crteža', date: '—' },
+  oneLiner: 'Sporohodno izlazno vratilo dvostepenog cilindričnog reduktora: prenosi obrtni moment sa velikog zupčanika preko paralelnog klina na spojnicu, dok kotrljajni ležaji na oba kraja primaju radijalno opterećenje.',
+  summary: 'Tipičan radionički crtež stepenastog vratila, prikazan jednim glavnim pogledom (osa horizontalna), dva izvučena preseka i jednim detaljem.\nSedam stepenika raste od krajeva ka sredini i formira naslone za aksijalno pozicioniranje zupčanika i ležaja; najveći stepenik Ø60 nosi veliki zupčanik, stepenici Ø55 sa obe strane nose konusne valjkaste ležaje, a izlazni kraj Ø45 se vezuje za spojnicu.\nTehnički zahtevi su usmereni na tri mesta: radijalno bacanje 0.025 oba ležajna mesta u odnosu na zajedničku bazu, simetričnost žleba za klin 0.02 i Ra0.4 na rukavcu zaptivača.\nMaterijal 40Cr, poboljšan na HB241–286, isporučuje se brušen.',
+  keywords: ['Stepenasto vratilo', '40Cr poboljšan', 'Paralelni klin', 'Konusni valjkasti ležaj', 'Pozicioniranje naslonom', 'H7/k6', 'Bacanje 0.025', 'Žleb za izlaz tocila'],
+  views: [
+    { name: 'Glavni pogled (osa horizontalna)', type: 'Osnovni pogled', describes: 'Aksijalni lanac dimenzija sedam stepenika, prečnici, obarači, žlebovi za izlaz tocila i navojni kraj' },
+    { name: 'Izvučeni presek A–A', type: 'Izvučeni presek', describes: 'Žleb za klin 14N9 na stepeniku spojnice Ø45, dubina t=5.5' },
+    { name: 'Izvučeni presek B–B', type: 'Izvučeni presek', describes: 'Žleb za klin 18N9 na sedištu zupčanika Ø60, dubina t=7.0' },
+    { name: 'Detalj I, 5:1', type: 'Detalj', describes: 'Prelazni radijus naslona R2 i žleb za izlaz tocila 2×0.5' },
+  ],
+  components: [],
+  features: [
+    { name: 'Naslon Ø68', spec: 'visina 4mm', purpose: 'Aksijalna površina za pozicioniranje zupčanika i unutrašnjeg prstena ležaja; prima aksijalnu silu i određuje položaj pri montaži' },
+    { name: 'Žleb za izlaz tocila', spec: '2×0.5', purpose: 'Omogućava izlaz tocila da u korenu ne ostane stepenik i koncentracija napona' },
+    { name: 'Žlebovi za klin', spec: '18N9×7.0 / 14N9×5.5', purpose: 'Prenos obrtnog momenta standardnim paralelnim klinovima; N9 je tešnja klasa tolerancije' },
+    { name: 'Središnja gnezda', spec: 'B3.15/10 GB/T 145', purpose: 'Zajednička baza za struganje i brušenje, kao i za ponovno centriranje pri popravci' },
+    { name: 'Obarači', spec: 'C2 / C1.5', purpose: 'Olakšavaju navlačenje ležaja i zupčanika, uklanjaju srh, štite površine naleganja pri montaži' },
+    { name: 'Prelazni radijusi', spec: 'R2', purpose: 'Smanjuju koncentraciju napona na naslonima — ključni za zamorni vek' },
+    { name: 'Navoj za osiguranje', spec: 'M36×1.5-6g', purpose: 'Okrugla navrtka sa sigurnosnom podloškom osigurava unutrašnji prsten ležaja' },
+  ],
+  principle: {
+    designIntent: 'Vratilo prati raspored jednake čvrstoće „debelo u sredini, tanko na krajevima": moment savijanja je najveći kod zupčanika, pa je stepenik Ø60 najveći; smanjivanje ka krajevima omogućava navlačenje delova sa obe strane i svakom delu daje sopstvenu površinu za aksijalno pozicioniranje. Klase naleganja prate uobičajenu praksu — k6 za unutrašnje prstene ležaja, r6 za zupčanik, m6 za spojnicu — tako da moment prenose preklop i klin zajedno.',
+    workingPrinciple: 'Posle dva stepena redukcije broja obrtaja motora, obrtni moment prelazi sa glavčine velikog zupčanika preko klina 18N9 na stepenik Ø60. Vratilo leži na konusnim valjkastim ležajima na oba kraja: radijalna sila ide preko ležaja u kućište, aksijalnu silu primaju naslon i okrugla navrtka. Moment izlazi preko kraja Ø45 i spojnice. Stepenik Ø50 radi uz semering i sprečava isticanje ulja iz kućišta.',
+    motionFlow: ['Glavčina velikog zupčanika', 'Klin 18N9', 'Stepenik Ø60', 'Telo vratila', 'Klinasta veza na kraju Ø45', 'Spojnica', 'Radna mašina'],
+    loadPath: ['Sila sprezanja zupčanika', 'Klin i površine presovanog naleganja', 'Presek sa kombinovanim savijanjem i uvijanjem', 'Ležajna mesta Ø55k6 na oba kraja', 'Ležaji', 'Otvori u kućištu'],
+  },
+  dimensions: [
+    { feature: 'Ležajna mesta (2)', nominal: 'Ø55', tolerance: 'k6 (+0.021/+0.002)', fit: 'Sa unutrašnjim prstenom ležaja klase P0', note: 'Prelazno naleganje sklono preklopu, sprečava okretanje prstena' },
+    { feature: 'Sedište zupčanika', nominal: 'Ø60', tolerance: 'r6 (+0.060/+0.041)', fit: 'H7/r6', note: 'Čvrsto naleganje, deli moment sa klinom' },
+    { feature: 'Stepenik spojnice', nominal: 'Ø45', tolerance: 'm6 (+0.025/+0.009)', fit: 'H7/m6', note: 'Prelazno naleganje za lako skidanje' },
+    { feature: 'Rukavac zaptivača', nominal: 'Ø50', tolerance: 'h9 (0/−0.062)', fit: 'Sa usnom semeringa', note: 'Labava tolerancija mere; zaptivanje zavisi od hrapavosti i kružnosti' },
+    { feature: 'Naslon', nominal: 'Ø68', tolerance: 'Opšta tolerancija GB/T 1804-m', fit: '—', note: 'Površina za pozicioniranje; upravnost se posredno kontroliše bacanjem' },
+    { feature: 'Širina žleba za klin (stepenik Ø60)', nominal: '18', tolerance: 'N9 (0/−0.043)', fit: 'Tesna veza paralelnim klinom', note: 'Dubina t=7.0, meri se kao Ø60−t' },
+    { feature: 'Ukupna dužina', nominal: '452', tolerance: '±0.5', fit: '—', note: 'Obe čeone površine su baze za brušenje' },
+  ],
+  gdt: [
+    { symbol: 'Radijalno bacanje', feature: 'Sedište zupčanika Ø60', value: '0.025', datum: 'Zajednička baza A–B', meaning: 'Ograničava bacanje sedišta zupčanika u odnosu na osu ležaja; direktno utiče na tačnost sprezanja i buku' },
+    { symbol: 'Radijalno bacanje', feature: 'Rukavac zaptivača Ø50', value: '0.04', datum: 'A–B', meaning: 'Preveliko bacanje periodično odiže usnu semeringa i izaziva curenje' },
+    { symbol: 'Simetričnost', feature: 'Srednja ravan žleba za klin', value: '0.02', datum: 'Osa Ø45', meaning: 'Ravnomerno opterećuje obe strane klina i sprečava jednostrano gnječenje' },
+    { symbol: 'Paralelnost', feature: 'Bočne strane žleba', value: '0.02/100', datum: 'Osa', meaning: 'Sprečava da klin sedne ukoso i zaglavi se' },
+  ],
+  surfaces: [
+    { feature: 'Ležajno mesto Ø55k6', roughness: 'Ra 0.8', process: 'Brušenje' },
+    { feature: 'Sedište zupčanika Ø60r6', roughness: 'Ra 0.8', process: 'Brušenje' },
+    { feature: 'Rukavac zaptivača Ø50', roughness: 'Ra 0.4', process: 'Brušenje, zatim poliranje bez usmerenih tragova' },
+    { feature: 'Bočne strane žleba', roughness: 'Ra 3.2', process: 'Glodanje prstastim glodalom ili dubljenje' },
+    { feature: 'Prečnici i čela bez naleganja', roughness: 'Ra 6.3', process: 'Struganje' },
+  ],
+  manufacturing: {
+    blank: 'Toplovaljana šipka Ø70×460; za serijsku proizvodnju preporučuje se kovanje u kalupu, da vlakna materijala idu duž ose i povećaju zamornu čvrstoću',
+    processes: ['Sečenje šipke Ø70×460', 'Grubo čeono struganje oba kraja, bušenje središnjih gnezda B3.15/10', 'Grubo struganje svih prečnika, dodatak 2.5mm po strani', 'Poboljšanje: kaljenje u ulju 850℃ + otpuštanje 520℃, HB241–286', 'Doterivanje središnjih gnezda', 'Polufino struganje sa dodatkom 0.4mm za brušenje, izrada žlebova i obarača', 'Glodanje (dubljenje) oba žleba za klin', 'Struganje navoja M36×1.5', 'Skidanje srha, pranje, ispravljanje', 'Brušenje Ø55k6, Ø60r6, Ø50 i površina za pozicioniranje', 'Završna kontrola i antikoroziono pakovanje'],
+    heatTreatment: 'Poboljšanje po celom preseku na HB241–286; za prašnjave uslove ili visoke brzine, indukciono kaliti rukavac zaptivača Ø50 na HRC45–50, dubina 1.0–1.5mm',
+    keyDifficulties: ['Bacanje 0.025 oba ležajna mesta u odnosu na zajedničku bazu — mora se brusiti u jednom stezanju između šiljaka', 'Simetričnost žleba 0.02 zahteva deobni pribor ili pažljivo podešavanje komparaterom', 'Radijusi naslona R2 i žlebovi su kritični za zamor — nisu dozvoljeni tragovi alata, udubljenja ni oštri uglovi'],
+    inspection: ['Prečnici mikrometrom uz povremenu kontrolu induktivnim meračem', 'Bacanje na uređaju sa šiljcima i komparaterom, oslonjeno na središnja gnezda (ili V-prizme)', 'Širina žleba čepnim kalibrom, simetričnost metodom okretanja uz komparater', 'Hrapavost profilometrom ili uporednim uzorcima', 'Posle poboljšanja, tvrdoća i metalografija na uzorcima iz svake šarže'],
+  },
+  applications: ['Sporohodno (izlazno) vratilo opštih dvostepenih cilindričnih reduktora', 'Pogoni tračnih i grabuljastih transportera', 'Kontinualni pogoni srednjeg opterećenja kao što su mešalice i mehanizmi kretanja dizalica'],
+  roleInSystem: 'To je poslednja karika izlaza obrtnog momenta u reduktoru: prenosni element (nosi ceo izlazni moment), noseći element (predaje sile sprezanja kućištu) i zaptivna površina (stepenik Ø50 uz semering). Ako bacanje ili kvalitet površine nisu u toleranciji, istovremeno se javljaju tri kvara: veća buka zupčanika, prevremeni otkaz ležaja i curenje ulja na poklopcu.',
+  materialsSeen: ['40Cr'],
+  risks: [
+    { level: 'Visok', item: 'Koncentracija napona na krajevima žleba i radijusima naslona', why: 'Vratilo trpi naizmenično savijanje; oštar ugao umesto radijusa može podići efektivni faktor koncentracije napona sa 1.6 na preko 2.5 i smanjiti granicu zamora za 30%+', suggestion: 'Strogo držati R2 i polirati radijuse, proveravati šablonom; koristiti žlebove sa zaobljenim krajem umesto pravougaonih' },
+    { level: 'Srednji', item: 'Ø60r6 i Ø55k6 su naleganja sa preklopom; hladno presovanje oštećuje površine', why: 'Ogrebotine pri presovanju smanjuju preklop i stvaraju začetke zamora', suggestion: 'Zupčanik i ležaje montirati toplo posle indukcionog ili uljnog zagrevanja na 80–100℃; zabranjeno udaranje' },
+    { level: 'Srednji', item: 'Spiralni tragovi obrade na rukavcu zaptivača', why: 'Spiralni tragovi „pumpaju" ulje napolje kao zavojnica i izazivaju stalno curenje', suggestion: 'Posle brušenja polirati kružno da tragovi ne budu usmereni, Ra≤0.4' },
+    { level: 'Nizak', item: 'Na crtežu nema zahteva za dinamičko uravnoteženje', why: 'Iznad 1500 o/min neuravnoteženost povećava vibracije ležaja', suggestion: 'Dodati klasu uravnoteženja (npr. G6.3) u tehničke zahteve' },
+  ],
+  improvements: ['Za velike serije zameniti klinastu vezu na Ø60 evolventnim ožlebljenjem ili steznim sklopom, čime se uklanja koncentracija napona žleba i poboljšava centriranje', 'Valjanjem ojačati radijuse naslona i krajeve žlebova; zamorni vek obično raste 30–60%', 'U tehničkim zahtevima navesti „zadržati središnja gnezda" (GB/T 145 B3.15/10) radi ponovnog centriranja pri popravci', 'Opšte klase dimenzionih i geometrijskih tolerancija navesti zajedno pored zaglavlja, da bude manje pitanja u radionici'],
+  uncertainties: ['Zapis o reviziji u donjem desnom delu zaglavlja (izmene revizije B) nije čitljiv', 'Deo tehničkog zahteva 3 o obimu indukcionog kaljenja je zamućen; ne može se potvrditi da li je obavezno', 'Nema izričitog pravila za dozvoljeno ispravljanje posle termičke obrade ni za nivo prihvatanja magnetne kontrole'],
+  glossary: [
+    { term: 'k6', meaning: 'Tolerancijsko polje vratila za prelazno naleganje u sistemu jedinstvenog otvora; uobičajeno za unutrašnje prstene kotrljajnih ležaja' },
+    { term: 'N9', meaning: 'Klasa tolerancije širine žleba za tesnu vezu standardnim paralelnim klinom' },
+    { term: '⌀ / Ø', meaning: 'Znak prečnika' },
+    { term: 'Radijalno bacanje', meaning: 'Najveća promena pokazivanja komparatera dok se element okrene jednom oko bazne ose' },
+    { term: 'Ra 0.8', meaning: 'Srednje aritmetičko odstupanje profila 0.8 μm, uobičajena brušena površina' },
+    { term: 'C2', meaning: 'Obarač 45°, aksijalna dužina 2mm' },
+    { term: '2×0.5', meaning: 'Žleb za izlaz tocila: širina 2mm, dubina 0.5mm' },
+    { term: 'B3.15/10', meaning: 'Središnje gnezdo tipa B prema GB/T 145, vodeći otvor Ø3.15, konus Ø10' },
+    { term: 'GB/T 1804-m', meaning: 'Srednja klasa opštih linearnih tolerancija' },
+  ],
+};
+
+EX_I18N.sr.material = {
+  materials: [{
+    grade: '40Cr', standard: 'GB/T 3077-2015', category: 'Legirani konstrukcioni čelik (hromni čelik)',
+    equivalents: [{ system: 'AISI/SAE', grade: '5140' }, { system: 'DIN/EN', grade: '41Cr4 (1.7035)' }, { system: 'JIS', grade: 'SCr440' }, { system: 'ISO', grade: '41Cr4' }, { system: 'UNS', grade: 'G51400' }],
+    composition: [
+      { element: 'C Ugljenik', range: '0.37 ~ 0.44' }, { element: 'Si Silicijum', range: '0.17 ~ 0.37' },
+      { element: 'Mn Mangan', range: '0.50 ~ 0.80' }, { element: 'Cr Hrom', range: '0.80 ~ 1.10' },
+      { element: 'P Fosfor', range: '≤ 0.035' }, { element: 'S Sumpor', range: '≤ 0.035' },
+    ],
+    mechanical: [
+      { property: 'Zatezna čvrstoća Rm', value: '≥ 980', unit: 'MPa', condition: 'Kaljenje u ulju 850℃ + otpuštanje 520℃, epruveta Ø25' },
+      { property: 'Donja granica tečenja ReL', value: '≥ 785', unit: 'MPa', condition: 'Isto kao gore' },
+      { property: 'Izduženje A', value: '≥ 9', unit: '%', condition: 'Isto kao gore' },
+      { property: 'Suženje preseka Z', value: '≥ 45', unit: '%', condition: 'Isto kao gore' },
+      { property: 'Udarna energija KU2', value: '≥ 47', unit: 'J', condition: 'Isto kao gore' },
+      { property: 'Tvrdoća posle poboljšanja', value: '241 ~ 286', unit: 'HBW', condition: 'Prema ovom crtežu' },
+      { property: 'Dinamička izdržljivost na savijanje σ₋₁', value: 'oko 350 ~ 420', unit: 'MPa', condition: 'Naizmenični ciklus, glatka epruveta; potvrditi ispitivanjem' },
+    ],
+    physical: [
+      { property: 'Gustina', value: '7.85', unit: 'g/cm³', condition: '20℃' },
+      { property: 'Modul elastičnosti E', value: '211', unit: 'GPa', condition: '20℃' },
+      { property: 'Poasonov koeficijent μ', value: '0.28', unit: '—', condition: '20℃' },
+      { property: 'Toplotna provodljivost', value: '44', unit: 'W/(m·K)', condition: '100℃' },
+      { property: 'Koeficijent toplotnog širenja', value: '11.6', unit: '×10⁻⁶/K', condition: '20 ~ 100℃' },
+    ],
+    heatTreatment: { route: 'Normalizacija 850–870℃ na vazduhu → poboljšanje: kaljenje u ulju 850℃±10℃ + otpuštanje 500–540℃', hardness: 'HB 241–286 (≈ Rm 820–950 MPa)', note: 'Posle otpuštanja brzo ohladiti kroz opseg 400–500℃ da se izbegne krtost pri otpuštanju; posle poboljšanja ispraviti i otpustiti napone na 200℃×2h' },
+    processability: {
+      machinability: 'Srednja u poboljšanom stanju (HB≤286), oko 85% u odnosu na čelik 45; tvrdi metal, vc 80–120 m/min',
+      weldability: 'Loša, ekvivalent ugljenika ≈0.72%; predgrevanje 200–300℃, otpuštanje napona 600–650℃ posle zavarivanja; reparaturno zavarivanje vratila se ne preporučuje',
+      formability: 'Dobra za toplo oblikovanje: početak kovanja 1150–1200℃, kraj ≥800℃; loša za hladno oblikovanje',
+      corrosion: 'Slaba otpornost na koroziju; neradne površine bruniranje ili ulje, u vlažnoj sredini fosfatiranje ili cinkovanje',
+    },
+    whyChosen: 'Izlazno vratilo trpi naizmenično kombinovano savijanje i uvijanje, pa su potrebna dobra ukupna mehanička svojstva i određena prokaljivost. 40Cr posle poboljšanja pouzdano dostiže HB241–286 i granicu tečenja ≥785 MPa ispod Ø60, sa zamornom čvrstoćom oko 20–30% većom od čelika 45 i znatno nižom cenom od 42CrMo — standardni izbor za vratila reduktora srednjeg opterećenja.',
+    cautions: ['Iznad Ø80 prokaljivost je nedovoljna i svojstva jezgra opadaju — koristiti 42CrMo', 'Sklon krtosti pri otpuštanju; posle otpuštanja brzo hladiti', 'Tragovi alata na žlebovima i radijusima značajno smanjuju zamorni vek; hrapavost mora biti ispunjena', 'Ako se dodaje indukciono kaljenje, meku zonu držati dalje od preseka najvećeg momenta savijanja'],
+    alternatives: [
+      { grade: 'Čelik 45', tradeoff: 'Oko 20% jeftiniji i lakši za obradu, ali manja zamorna čvrstoća i prokaljivost; samo za laka opterećenja ili velika sporohodna vratila' },
+      { grade: '42CrMo', tradeoff: 'Bolja prokaljivost i čvrstoća na povišenoj temperaturi, za preseke iznad Ø80 ili teška udarna opterećenja; oko 30% skuplji, nešto teži za obradu' },
+      { grade: '20CrMnTi cementiran', tradeoff: 'Površinska tvrdoća HRC58–62 i mnogo bolja otpornost na habanje, ali zahteva cementaciju i kontrolu dodatka za brušenje; veće deformacije pri termičkoj obradi' },
+      { grade: 'QT600-3 nodularni liv', tradeoff: 'Dobro prigušenje vibracija i niska cena, ali nedovoljna čvrstoća i žilavost; samo za mala opterećenja pri malim brzinama ili livene čaure' },
+    ],
+  }],
+  failureModes: [
+    { mode: 'Lom usled zamora pri savijanju', where: 'Krajevi žleba za klin, radijusi naslona R2', why: 'Naizmenično savijanje stvara prsline na mestima koncentracije napona koje vremenom rastu; prelomna površina pokazuje linije zamora', control: 'Držati radijus i hrapavost, koristiti žlebove sa zaobljenim krajem, po potrebi valjanje' },
+    { mode: 'Frettig habanje (frettig zamor)', where: 'Sedište zupčanika Ø60 i ležajna mesta Ø55', why: 'Pri nedovoljnom preklopu mikroklizanje na naleganju stvara crvenkastosmeđe čestice i začetke prslina', control: 'Obezbediti preklop i čistu montažu; po potrebi pooštriti klasu naleganja' },
+    { mode: 'Plastična deformacija uvijanjem', where: 'Stepenik spojnice Ø45 (najmanji presek)', why: 'Vršni moment pri udaru na startu ili blokadi mašine prelazi granicu tečenja', control: 'Proveriti prema vršnom momentu i ugraditi sigurnosnu spojnicu ili ograničivač momenta' },
+    { mode: 'Žlebljenje na mestu zaptivača', where: 'Rukavac Ø50', why: 'Dugotrajno trenje usne semeringa sa česticama nečistoće', control: 'Indukciono kaljenje ili tvrdo hromiranje, Ra ≤ 0.4, dodati usnu protiv prašine' },
+  ],
+  strengthNotes: [
+    'Proveriti kritične preseke na kombinovano savijanje i uvijanje: prelazi naslona Ø55/Ø60 i oba preseka sa žlebom',
+    'Proveriti nosivost presovanog naleganja zupčanika; preklop birati prema GB/T 5371 i stvarnom porastu temperature',
+    'Stepen sigurnosti na zamor iz σ₋₁ i efektivnog faktora koncentracije napona kσ; obično S ≥ 1.5',
+    'Krutost: najveći ugib između ležaja ≤ 0.0003L, nagib kod zupčanika ≤ 0.001 rad',
+  ],
+  sourceNote: 'Mehanička i fizička svojstva su propisane vrednosti GB/T 3077-2015 za epruvete Ø25mm i tipične vrednosti iz priručnika. Stvarni delovi su slabiji od epruveta zbog uticaja veličine preseka; za proračune i prijem koristiti ateste isporučioca i izmerene podatke.',
+};
+
+EX_I18N.sr.ocr = {
+  titleBlock: [
+    { field: 'Naziv', value: 'Izlazno vratilo' }, { field: 'Br. crteža', value: 'JSD-04-02' },
+    { field: 'Razmera', value: '1:2' }, { field: 'Materijal', value: '40Cr' },
+    { field: 'Kol.', value: '1' }, { field: 'Revizija', value: 'B' },
+  ],
+  items: [
+    { zone: 'Segment 1 (red 1, kolona 1) levi kraj', kind: 'Dimenzija', text: 'Ø45 m6 (+0.025/+0.009)' },
+    { zone: 'Segment 2 (red 1, kolona 2) sredina', kind: 'Dimenzija', text: 'Ø55 k6 (+0.021/+0.002)' },
+    { zone: 'Segment 2 (red 1, kolona 2) sredina', kind: 'Dimenzija', text: 'Ø60 r6 (+0.060/+0.041)' },
+    { zone: 'Segment 3 (red 1, kolona 3) desni kraj', kind: 'Dimenzija', text: 'M36×1.5-6g' },
+    { zone: 'Segment 2 gore', kind: 'Geometrijska tolerancija', text: '⌰ | 0.025 | A–B' },
+    { zone: 'Segment 4 (red 2, kolona 1)', kind: 'Geometrijska tolerancija', text: '= | 0.02 | A' },
+    { zone: 'Segment 2 gore', kind: 'Hrapavost', text: 'Ra 0.8' },
+    { zone: 'Segment 5 (red 2, kolona 2)', kind: 'Hrapavost', text: 'Ra 0.4' },
+    { zone: 'Segment 4, presek A–A', kind: 'Dimenzija', text: '14 N9 (0/−0.043), t = 5.5' },
+    { zone: 'Segment 5, presek B–B', kind: 'Dimenzija', text: '18 N9 (0/−0.043), t = 7.0' },
+    { zone: 'Segment 1 dole', kind: 'Dimenzija', text: '452 ±0.5 (ukupna dužina)' },
+    { zone: 'Segment 3, detalj I', kind: 'Napomena', text: 'I  5:1   R2   2×0.5' },
+    { zone: 'Segment 6 (red 2, kolona 3)', kind: 'Oznaka pogleda', text: 'A–A    B–B' },
+    { zone: 'Segment 1, leva čeona površina', kind: 'Napomena', text: 'Središnja gnezda B3.15/10 GB/T 145 (oba kraja)' },
+  ],
+  technicalNotes: [
+    'Poboljšati na HB241–286.',
+    'Neoznačeni obarači C1.5, neoznačeni radijusi R2.',
+    'Opšte linearne tolerancije prema GB/T 1804-m; opšte geometrijske tolerancije prema GB/T 1184-K.',
+    'Skinuti srh i zaobliti oštre ivice; posle obrade nisu dozvoljene prsline, preklopi i slične greške.',
+  ],
+  unclear: [
+    { zone: 'Zaglavlje, dole desno', what: 'Opis izmene za reviziju B', why: 'Pregib na originalu; potezi se spajaju' },
+    { zone: 'Kraj tehničkog zahteva 3', what: 'Obim indukcionog kaljenja', why: 'Bled otisak; poslednjih nekoliko znakova nečitko' },
+  ],
+  coverage: 'Zaglavlje, glavne dimenzije, geometrijske tolerancije i tehnički zahtevi su u potpunosti prepisani; zapis o reviziji i dva nejasna mesta nisu potvrđeni i navedeni su kao nečitki.',
+};
+EX_I18N.sr.meta = {
+  planText: 'Segmenti 3×2, poslato 7 slika\nDetalj uvećan 2.4× u odnosu na pregled, u izvornoj rezoluciji',
+  planNote: '(primer vrednosti — preračunava se prema stvarnoj rezoluciji kada otpremiš fajl)',
+  at: 'Primer podataka',
+  srcName: 'Primer · radionički crtež izlaznog vratila reduktora',
+  srcMeta: [['Crtež', 'Izlazno vratilo reduktora JSD-04-02'], ['Materijal', '40Cr poboljšan HB241–286'], ['Status', 'Ugrađeni primer, zamenjuje se kada otpremiš fajl']],
+  svgLabel: 'Primer: skica stepenastog vratila',
+  pdfCaption: 'Primer skice · stepenasto vratilo',
+  qa: [{
+    q: 'Zašto se radijalno bacanje oba ležajna mesta kontroliše u odnosu na zajedničku bazu A–B?',
+    a: 'Zato što se vratilo na kraju okreće na dva ležaja u kućištu: da li zupčanik radi „pravo" određuje osa koju zajedno definišu oba ležajna mesta, a ne bilo koji pojedinačni prečnik.\nAko bi baza bila samo jedan kraj, greška na drugom kraju bi se uvećala na sedištu zupčanika, što se posle montaže vidi kao bacanje čela zupčanika, buka sprezanja i zagrevanje ležaja.\nZajednička baza A–B ima i tehnološko značenje: pri kontroli deo mora da leži na dve V-prizme ili između dva šiljka i da se meri komparaterom, isto kao što je stvarno oslonjen u kućištu — samo tada izmerene vrednosti imaju smisla.',
+  }],
+};
+
+EX_I18N.sr.eng = {
+  optimizations: [
+    { target: 'Konstrukcija · klinasta veza na Ø60', current: 'Jedan klin prenosi moment; kraj žleba je najjače mesto koncentracije napona na celom vratilu i većina zamornih prslina kreće odatle', proposal: 'Zameniti evolventnim ožlebljenjem (npr. INV 28×1.5×18×7H/7e) ili steznim sklopom (npr. tip Z2), bez žleba za klin', benefit: 'Efektivni faktor koncentracije napona pada sa ≈2.1 na 1.3–1.5, zamorni vek obično +30–60%; bolje centriranje i manja buka zupčanika', cost: 'Ožlebljenje zahteva posebno odvalno glodalo ili dubilicu, cena komada ≈+15%; stezni sklop zahteva veću glavčinu', effort: 'Srednji', priority: 'Visok' },
+    { target: 'Tehnologija · radijusi naslona i žlebovi za izlaz tocila', current: 'Propisani samo R2 i 2×0.5, bez površinskog ojačanja', proposal: 'Valjanjem ojačati oba radijusa naslona i krajeve žlebova (800–1200 N za Ø60, pomak 0.15 mm/o, 2 prolaza)', benefit: 'Sloj zaostalih pritisnih napona 0.3–0.6 mm; dinamička izdržljivost na savijanje +20–40%', cost: 'Jedna dodatna operacija, ≈1.5 min po komadu, potreban alat za valjanje', effort: 'Nizak', priority: 'Visok' },
+    { target: 'Tolerancija · rukavac zaptivača Ø50', current: 'h9 uz Ra0.4, bez propisanog pravca tragova i tvrdoće', proposal: 'Dodati „posle brušenja polirati bez usmerenih tragova, spiralni tragovi nisu dozvoljeni" i, zavisno od uslova rada, indukciono kaliti na HRC45–50', benefit: 'Uklanja najčešću reklamaciju zbog curenja na poklopcu; kaljenje znatno odlaže žlebljenje na mestu zaptivača', cost: 'Indukciono kaljenje povećava trošak opreme i kontrole, ≈¥8 po komadu', effort: 'Nizak', priority: 'Srednji' },
+    { target: 'Pripremak · način sečenja', current: 'Toplovaljana šipka Ø70×460 sa velikim dodatkom za struganje', proposal: 'Iznad 500 komada preći na otkivke iz kalupa, stepen kovanja ≥3, vlakna duž ose', benefit: 'Iskorišćenje materijala sa ≈45% na preko 70%, zamorna čvrstoća dodatnih +10–20%', cost: 'Potreban alat; cenu komada treba izračunati prema veličini serije', effort: 'Visok', priority: 'Srednji' },
+  ],
+  dfm: [
+    { issue: 'Oba ležajna mesta traže bacanje 0.025 prema zajedničkoj bazi, ali crtež ne kaže da li se središnja gnezda zadržavaju', impact: 'Ako radionica posle finog struganja ukloni gnezda, deo se ne može brusiti između šiljaka i bacanje se teško postiže', fix: 'U tehničke zahteve upisati „zadržati središnja gnezda GB/T 145 B3.15/10, ne uklanjati"' },
+    { issue: 'Za simetričnost žleba 0.02 nije definisan način uspostavljanja baze', impact: 'Različite smene mere na različite načine i rezultati ponovne kontrole se ne slažu', fix: 'Navesti „baza iz oba središnja gnezda, merenje na V-prizmama komparaterom"' },
+    { issue: 'Navoj M36×1.5 je odmah do ležajnog mesta Ø55k6, bez žleba za izlaz navoja', impact: 'Izlaz navoja može zadreti u ležajno mesto i blokirati montažu', fix: 'Dodati žleb 3×1 ili propisati dužinu izlaza navoja' },
+  ],
+  toleranceStack: [
+    { chain: 'Aksijalno pozicioniranje zupčanika: čelo naslona → glavčina zupčanika → distancer → unutrašnji prsten ležaja', concern: 'Zbir tolerancija dužina može ostaviti više od 0.1 mm aksijalnog zazora između zupčanika i ležaja', action: 'Dužine u lancu pozicioniranja kotirati od jedne baze i proračunati dimenzioni lanac za ukupnu dužinu i položaj naslona' },
+    { chain: 'Preklop Ø60r6 prema otvoru zupčanika H7', concern: 'Pri najmanjem preklopu od 0.020 mm moment trenja možda neće preneti vršni moment, što izaziva frettig', action: 'Proračunati najmanji preklop prema GB/T 5371; po potrebi preći na s6 ili produžiti naleganje' },
+  ],
+  calculations: [
+    { item: 'Čvrstoća kritičnih preseka na kombinovano savijanje i uvijanje', formula: 'σca = √(σb² + 4τ²) ≤ [σ-1], na prelazu naslona Ø55/Ø60 i presecima sa žlebom', input: 'Izlazni moment T, podeoni prečnik zupčanika, razmak ležaja, radijalne i aksijalne sile', criterion: 'Stepen sigurnosti S ≥ 1.5' },
+    { item: 'Provera zamorne čvrstoće', formula: 'Sσ = σ-1 /(kσ·σa/εσ/β + ψσ·σm)', input: 'σ-1 ≈ 350–420 MPa, efektivni faktor koncentracije napona kσ, faktor veličine εσ, faktor površine β', criterion: 'Sσ ≥ 1.5, posebno za radijuse i žlebove' },
+    { item: 'Nosivost presovanog naleganja', formula: 'Mf = π·d²·L·p·f/2', input: 'Dodirni pritisak p pri najmanjem preklopu, koeficijent trenja f 0.12–0.15, dužina naleganja L', criterion: 'Mf ≥ 1.5 × nazivni moment' },
+    { item: 'Krutost vratila i ugib', formula: 'Ugib y i nagib θ kod zupčanika metodom superpozicije za prosto oslonjenu gredu', input: 'E=211 GPa, momenti inercije stepenika, raspodela opterećenja', criterion: 'y ≤ 0.0003L, θ ≤ 0.001 rad' },
+  ],
+  verification: {
+    objective: 'Potvrditi zamorni vek, pouzdanost naleganja i zaptivanje pri nazivnom i preopterećenju, i proveriti da tolerancije i termička obrada sa crteža obezbeđuju projektovani vek',
+    specimens: '6 serijskih vratila iz iste šarže poboljšanja (3 za zamor celog vratila, 2 za metalografiju i tvrdoću, 1 rezerva), plus 3 standardne epruvete Ø10 za zatezanje',
+    equipment: ['Servohidraulična mašina za zamor (≥100 kN·m uvijanje ili ±50 kN savijanje)', 'Uređaj sa šiljcima i induktivnim meračem (rezolucija 1 μm)', 'Profilometar (opseg Ra 0.05–10 μm)', 'Tvrdomer po Rokvelu/Brinelu', 'Metalografski mikroskop', 'Uređaj za magnetnu kontrolu', 'Probni sto za zaptivače (sa regulacijom temperature i brzine)'],
+    steps: [
+      { no: 1, action: 'Ulazna i geometrijska kontrola', condition: 'Sobna temperatura 20±5℃', record: 'Prečnici stepenika, bacanje, simetričnost žleba, hrapavost', criterion: 'Sve prema crtežu, bacanje ≤0.025' },
+      { no: 2, action: 'Potvrda kvaliteta poboljšanja', condition: 'Uzorak iz svake šarže', record: 'Tvrdoća površine i jezgra, mikrostruktura, dubina razugljeničenja', criterion: 'HB241–286, otpušteni sorbit, razugljeničenje ≤0.1 mm' },
+      { no: 3, action: 'Magnetna kontrola', condition: 'Kružno i uzdužno magnetisanje', record: 'Položaj i veličina grešaka', criterion: 'Bez linijskih indikacija na radijusima i žlebovima' },
+      { no: 4, action: 'Ispitivanje zamora pri rotacionom savijanju', condition: 'Po jedno vratilo na 1.0 / 1.2 / 1.4 × nazivna amplituda napona, 3000 o/min', record: 'Broj ciklusa, mesto nastanka prsline, izgled preloma', criterion: '≥1×10⁷ ciklusa bez otkaza pri nazivnom opterećenju' },
+      { no: 5, action: 'Montaža i demontaža presovanog naleganja', condition: 'Zupčanik zagrejan na 90±10℃ i navučen, demontaža posle 100 h rada', record: 'Sila utiskivanja, tragovi frettinga, stvarni preklop', criterion: 'Bez crvenkastosmeđih čestica, ogrebotine ≤2% površine naleganja' },
+      { no: 6, action: 'Ispitivanje zaptivača na probnom stolu', condition: 'Rukavac Ø50, 1500 o/min, ulje 80℃, 500 h neprekidno', record: 'Curenje, dubina habanja rukavca, stanje usne zaptivača', criterion: 'Bez vidljivog curenja, habanje rukavca ≤0.02 mm' },
+    ],
+    measurements: [
+      { item: 'Bacanje oba ležajna mesta prema zajedničkoj bazi', method: 'Između šiljaka + komparater', tolerance: '≤0.025 mm' },
+      { item: 'Simetričnost žleba za klin', method: 'V-prizma + metoda okretanja uz komparater', tolerance: '≤0.02 mm' },
+      { item: 'Hrapavost i tragovi na rukavcu zaptivača', method: 'Profilometar + mikroskop 30×', tolerance: 'Ra ≤0.4 μm, bez spiralnih tragova' },
+      { item: 'Tvrdoća posle poboljšanja', method: 'Tvrdomer po Brinelu, po 3 tačke na čelu i u sredini', tolerance: 'HB 241–286' },
+      { item: 'Preklop naleganja', method: 'Pre montaže posebno izmeriti vratilo i otvor, uzeti razliku', tolerance: 'U proračunskom opsegu za Ø60 H7/r6' },
+    ],
+    safety: ['Ogradi prostor za ispitivanje zamora — epruveta može odleteti pri lomu', 'Pri toploj montaži koristiti rukavice otporne na toplotu i namenski pribor za podizanje; zupčanik nikada ne pridržavati rukom', 'Na vrućem uljnom krugu probnog stola predvideti rasterećenje pritiska i posudu za kapanje; bez otvorenog plamena u zoni ispitivanja'],
+    schedule: 'Kontrola geometrije i materijala 1 nedelja; ispitivanja zamora 3–5 nedelja (zavisi od broja ciklusa); probni sto za zaptivače 3 nedelje; paralelno ukupno ≈6 nedelja uz 2 tehničara',
+  },
+  costNotes: [
+    'Materijal čini ≈35% cene komada, mašinska obrada ≈45%, termička obrada ≈12%; optimizaciju usmeriti na skraćenje brušenja, a ne na promenu materijala',
+    'Ispod 200 komada šipka je i dalje najjeftinija; iznad 500 komada otkivci su povoljniji po ukupnom trošku',
+  ],
+  standardsToCheck: [
+    { standard: 'GB/T 1800.2-2020', clause: 'Tablice graničnih odstupanja za k6 / r6 / m6', why: 'Proveriti da li odstupanja na crtežu odgovaraju standardu' },
+    { standard: 'GB/T 1095-2003 / GB/T 1096-2003', clause: 'Dimenzije i tolerancije paralelnih klinova i žlebova', why: 'Potvrditi da širine i dubine 18N9 i 14N9 odgovaraju vrsti naleganja klina' },
+    { standard: 'GB/T 3077-2015', clause: 'Mehanička svojstva i stanje isporuke za 40Cr', why: 'Potvrditi opseg tvrdoće posle poboljšanja i korekciju zbog veličine preseka' },
+  ],
+  openIssues: [
+    'Stvarni spektar momenta i faktor udara pri pokretanju nisu poznati, a direktno utiču na zaključak o zamoru — zatražiti spektar opterećenja od proizvođača mašine',
+    'Da li je indukciono kaljenje obavezno nije jasno zbog zamućenog teksta; projektant mora da potvrdi',
+    'Za neradne površine nije naveden zahtev za antikorozionu zaštitu ili premaz',
+  ],
+};
+
 const EX_DRAWING = {
   docType: '零件图', confidence: 88,
   titleBlock: { title: '输出轴', drawingNo: 'JSD-04-02', scale: '1:2', projection: '第一角法', material: '40Cr', quantity: '1', unit: 'mm', standard: 'GB/T 1800.2-2020、GB/T 1184-1996', revision: 'B', org: '示例图纸', date: '—' },
@@ -1956,24 +2523,46 @@ const EX_OCR = {
   coverage: '标题栏、主要尺寸、形位公差与技术要求已全部抄录；更改记录栏与两处模糊文字未能确认，已列入未辨认清单。',
 };
 
+function getExampleSet() {
+  const lang = getLang();
+  if (lang === 'zh') {
+    return {
+      drawing: EX_DRAWING, material: EX_MATERIAL, eng: EX_ENG, ocr: EX_OCR,
+      planText: '分块 3×2，共 7 张送检\n细节相对整图放大 2.4×，已达原图原生分辨率',
+      planNote: '（示例数值，投放文件后按实际分辨率重算）',
+      at: '示例数据', srcName: '示例 · 减速器输出轴零件图', svgLabel: '示例示意图 · 阶梯轴',
+      srcMeta: [['图纸', '减速器输出轴 JSD-04-02'], ['材料', '40Cr 调质 HB241~286'], ['状态', '内置示例，投放文件即替换']],
+      qa: [{
+        q: '为什么两处轴承位要用公共基准 A—B 来控制圆跳动？',
+        a: '因为轴最终是靠两端轴承支承在箱体里旋转的，真正决定齿轮是否"转正"的，是这两个轴承位共同确定的那条回转轴线，而不是任何单独一段外圆。\n如果只用其中一端做基准，另一端的偏差会被放大到齿轮安装面上，装配后表现为齿轮端面摆动、啮合噪声和轴承温升。\n用公共基准 A—B 还有一个工艺含义：检验时必须把零件架在两个 V 形铁或两个中心孔上打表，这与它在箱体里的实际支承状态一致，测出来的数才有意义。',
+      }],
+    };
+  }
+  const ex = EX_I18N[lang] || EX_I18N.en;
+  return {
+    drawing: ex.drawing, material: ex.material, eng: ex.eng, ocr: ex.ocr,
+    planText: ex.meta.planText, planNote: ex.meta.planNote, at: ex.meta.at,
+    srcName: ex.meta.srcName, srcMeta: ex.meta.srcMeta, qa: ex.meta.qa,
+    svgLabel: ex.meta.svgLabel || ex.meta.pdfCaption,
+  };
+}
+
 function showExample() {
   S.demo = true;
+  const ex = getExampleSet();
   S.report = {
-    kind: 'drawing', mode: 'eng', data: EX_DRAWING, mat: EX_MATERIAL,
-    extra: EX_ENG, ocr: EX_OCR, planText: '分块 3×2，共 7 张送检\n细节相对整图放大 2.4×，已达原图原生分辨率',
-    at: '示例数据',
-    src: { name: '示例 · 减速器输出轴零件图', kind: 'image', note: '' },
-    qa: [{
-      q: '为什么两处轴承位要用公共基准 A—B 来控制圆跳动？',
-      a: '因为轴最终是靠两端轴承支承在箱体里旋转的，真正决定齿轮是否"转正"的，是这两个轴承位共同确定的那条回转轴线，而不是任何单独一段外圆。\n如果只用其中一端做基准，另一端的偏差会被放大到齿轮安装面上，装配后表现为齿轮端面摆动、啮合噪声和轴承温升。\n用公共基准 A—B 还有一个工艺含义：检验时必须把零件架在两个 V 形铁或两个中心孔上打表，这与它在箱体里的实际支承状态一致，测出来的数才有意义。',
-    }],
+    kind: 'drawing', mode: 'eng', data: ex.drawing, mat: ex.material,
+    extra: ex.eng, ocr: ex.ocr, planText: ex.planText,
+    at: ex.at,
+    src: { name: ex.srcName, kind: 'image', note: '' },
+    qa: ex.qa.map(x => ({ q: x.q, a: x.a })),
   };
   renderReport();
-  showPlan(S.report.planText + '\n（示例数值，投放文件后按实际分辨率重算）');
+  showPlan(S.report.planText + '\n' + ex.planNote);
   $('#srcBox').innerHTML = EX_SVG;
   $('#srcBox').style.color = 'var(--ink2)';
-  $('#srcKind').textContent = '示例';
-  $('#srcMeta').innerHTML = [['图纸', '减速器输出轴 JSD-04-02'], ['材料', '40Cr 调质 HB241~286'], ['状态', '内置示例，投放文件即替换']]
+  $('#srcKind').textContent = t('src.example');
+  $('#srcMeta').innerHTML = ex.srcMeta
     .map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
 }
 
@@ -2009,12 +2598,12 @@ async function exportPDF() {
     const capTxt = 'font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#6C7C85;margin-top:7px';
     if (S.demo) {
       srcImg = '<div style="' + capBase + ';color:#3B4A53">' + EX_SVG +
-        '<div style="' + capTxt + '">示例示意图 · 阶梯轴</div></div>';
+        '<div style="' + capTxt + '">' + esc(getExampleSet().svgLabel || t('pdf.srcCaption')) + '</div></div>';
     } else if (S.src && S.src.kind === 'image' && S.src.bitmap) {
       const k = Math.min(1, 1500 / Math.max(S.src.w, S.src.h));
       const cv = bitmapToCanvas(S.src.bitmap, S.src.w * k, S.src.h * k);
       srcImg = '<div style="' + capBase + '"><img src="' + cv.toDataURL('image/jpeg', 0.86) +
-        '" style="max-width:100%;display:block;margin:0 auto"><div style="' + capTxt + '">源图 · ' +
+        '" style="max-width:100%;display:block;margin:0 auto"><div style="' + capTxt + '">' + esc(t('pdf.srcCaption')) + ' · ' +
         esc(S.src.name) + (S.src.note ? ' · ' + esc(S.src.note) : '') + '</div></div>';
     }
     host.innerHTML = '<div style="' + PRINT_VARS + '">' + head + srcImg + reportHTML(S.report, true) + '</div>';
@@ -2094,7 +2683,7 @@ function findBreak(ctx, w, y, maxBack) {
 async function ask(q) {
   if (!q || !S.report || !S.sample || S.busy) return;
   S.busy = true; syncRun();
-  const btn = $('#askBtn'); btn.disabled = true; btn.textContent = '思考中…';
+  const btn = $('#askBtn'); btn.disabled = true; btn.textContent = t('ask.thinking');
   S.abort = new AbortController();
   try {
     const ctxJSON = JSON.stringify({ kind: S.report.kind, analysis: S.report.data, materials: S.report.mat });
@@ -2119,7 +2708,7 @@ async function ask(q) {
   } catch (e) {
     toast(errMsg(e), 5000);
   } finally {
-    btn.textContent = '提问'; S.busy = false; S.abort = null; syncRun();
+    btn.textContent = t('btn.ask'); S.busy = false; S.abort = null; syncRun();
   }
 }
 
@@ -2132,7 +2721,7 @@ function saveHistory() {
     const list = loadHist().filter(x => x.id !== S.report.id);
     if (!S.report.id) S.report.id = 'r' + Date.now();
     list.unshift({ id: S.report.id, title: reportTitle(), kind: S.report.kind, mode: S.report.mode, at: S.report.at,
-      data: S.report.data, mat: S.report.mat, extra: S.report.extra, ocr: S.report.ocr,
+      data: S.report.data, mat: S.report.mat, extra: S.report.extra, ocr: S.report.ocr, lang: S.report.lang || 'zh',
       planText: S.report.planText, qa: S.report.qa, src: S.report.src });
     while (list.length > 12) list.pop();
     for (let i = 0; i < 4; i++) {
@@ -2143,7 +2732,7 @@ function saveHistory() {
 }
 function renderHistory() {
   const list = loadHist(), ul = $('#hist');
-  if (!list.length) { ul.innerHTML = '<li class="empty">还没有记录。解析过的图纸会保存在本浏览器里。</li>'; return; }
+  if (!list.length) { ul.innerHTML = '<li class="empty">' + esc(t('hist.empty')) + '</li>'; return; }
   ul.innerHTML = list.map(h => '<li><button type="button" data-id="' + esc(h.id) + '">' +
     '<span class="ht">' + esc(h.title) + '</span>' +
     '<span class="hd">' + esc(TX(h.kind === 'code' ? '代码' : h.kind === 'chart' ? '图表' : '图纸')) +
@@ -2152,7 +2741,8 @@ function renderHistory() {
 function openHistory(id) {
   const h = loadHist().find(x => x.id === id); if (!h) return;
   S.report = { kind: h.kind, mode: h.mode || 'eng', data: h.data, mat: h.mat, extra: h.extra || null,
-    ocr: h.ocr || null, planText: h.planText || '', qa: h.qa || [], at: h.at, src: h.src || {}, id: h.id };
+    ocr: h.ocr || null, planText: h.planText || '', qa: h.qa || [], at: h.at, src: h.src || {}, id: h.id,
+    lang: h.lang || 'zh' };
   S.demo = false; renderReport(); syncRun();
   $('#reportState').textContent = t('reportState.history') + ' · ' + h.at;
   $('#sheet').scrollIntoView({ behavior: 'smooth', block: 'start' });
