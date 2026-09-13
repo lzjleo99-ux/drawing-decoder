@@ -136,7 +136,9 @@ async function intake(file) {
   try {
     if (ext === '.pdf' || file.type === 'application/pdf') return await intakePDF(file);
     if (ext === '.dxf') return await intakeDXF(file);
-    if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif|tiff?)$/i.test(name)) return await intakeImage(file);
+    if (ext === '.docx') return await intakeDocx(file);
+    if (ext === '.doc') { toast(t('err.oldDoc'), 6000); return; }
+    if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif|tiff?|svg)$/i.test(name)) return await intakeImage(file);
     if (CODE_EXT.test(name) || file.type.startsWith('text/')) return await intakeText(file);
     if (/\.(dwg|sldprt|sldasm|step|stp|iges|igs|stl|x_t|catpart|prt|ipt|3dm)$/i.test(name)) {
       toast(t('toast.unsupportedModel') + ext + t('toast.unsupportedModelTail'), 6000);
@@ -153,8 +155,121 @@ async function intake(file) {
   }
 }
 
+/* ============ DOCX：解析（zip 结构，浏览器原生解压，不依赖第三方库） ============ */
+async function unzipEntries(buf) {
+  const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  const entries = new Map();
+  let pos = 0;
+  while (pos + 4 <= bytes.length) {
+    const sig = view.getUint32(pos, true);
+    if (sig !== 0x04034b50) break; // 本地文件头区结束（后面是中央目录），提前退出
+    const method = view.getUint16(pos + 8, true);
+    const compSize = view.getUint32(pos + 18, true);
+    const nameLen = view.getUint16(pos + 26, true);
+    const extraLen = view.getUint16(pos + 28, true);
+    const nameStart = pos + 30;
+    const name = new TextDecoder('utf-8').decode(bytes.subarray(nameStart, nameStart + nameLen));
+    const dataStart = nameStart + nameLen + extraLen;
+    const raw = bytes.subarray(dataStart, dataStart + compSize);
+    let data = null;
+    if (method === 0) { data = raw; }
+    else if (method === 8) {
+      if (typeof DecompressionStream === 'undefined') throw new Error(t('err.docxUnsupported'));
+      const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      data = new Uint8Array(await new Response(stream).arrayBuffer());
+    } // 其他压缩方式（很少见）跳过，不影响其余条目的解析
+    if (data) entries.set(name, data);
+    pos = dataStart + compSize;
+    if (compSize === 0 && nameLen === 0) break; // 防御性退出，避免异常文件死循环
+  }
+  return entries;
+}
+
+function docxXmlToText(xmlBytes) {
+  const xml = new TextDecoder('utf-8').decode(xmlBytes);
+  let out = xml
+    .replace(/<w:tab\/>/g, '\t')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<w:br\s*\/>/g, '\n')
+    .replace(/<[^>]+>/g, '');
+  return out.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function intakeDocx(file) {
+  toast(t('toast.parsingDocx'));
+  const buf = await file.arrayBuffer();
+  const entries = await unzipEntries(buf);
+  const docXml = entries.get('word/document.xml');
+  const text = docXml ? docxXmlToText(docXml) : '';
+  const mediaNames = Array.from(entries.keys()).filter(n => /^word\/media\//i.test(n) && /\.(png|jpe?g|gif|bmp)$/i.test(n));
+  // 挑体积最大的一张图当主视觉入口——文档里通常这就是最重要的插图/数据图
+  let best = null, bestSize = 0;
+  for (const n of mediaNames) { const d = entries.get(n); if (d.length > bestSize) { best = n; bestSize = d.length; } }
+
+  if (best) {
+    const mime = /\.png$/i.test(best) ? 'image/png' : /\.gif$/i.test(best) ? 'image/gif' : /\.bmp$/i.test(best) ? 'image/bmp' : 'image/jpeg';
+    const blob = new Blob([entries.get(best)], { type: mime });
+    const bmp = await createImageBitmap(blob).catch(() => null);
+    if (!bmp) throw new Error(t('err.imageDecode'));
+    S.src = {
+      kind: 'image', name: file.name, size: file.size, bitmap: bmp, w: bmp.width, h: bmp.height, pages: null,
+      vector: sliceBytes(text, 14000),
+      note: tf('note.docx', { n: mediaNames.length, chars: text.length }),
+    };
+    paintSource();
+  } else if (text) {
+    S.src = { kind: 'code', name: file.name, size: file.size, text: text, lines: text.split(/\r\n|\r|\n/).length, truncated: false, isDocument: true };
+    paintSource();
+  } else {
+    throw new Error(t('err.docxEmpty'));
+  }
+}
+
+// 部分 SVG（尤其是 CAD/CorelDRAW 导出、宽高用 mm/pt 等物理单位标注的）
+// createImageBitmap() 直接解码会失败，退路是走 <img> + canvas 走一遍布局再栅格化。
+async function rasterizeSVG(file) {
+  const raw = await file.text();
+  let w = 0, h = 0;
+  const wm = raw.match(/<svg[^>]*\swidth="([\d.]+)(px)?"/i);
+  const hm = raw.match(/<svg[^>]*\sheight="([\d.]+)(px)?"/i);
+  if (wm && hm) { w = parseFloat(wm[1]); h = parseFloat(hm[1]); }
+  if (!w || !h) {
+    const vb = raw.match(/viewBox="\s*[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)\s*"/i);
+    if (vb) { w = parseFloat(vb[1]); h = parseFloat(vb[2]); }
+  }
+  if (!w || !h) { w = 1200; h = 900; }
+  const maxSide = 2000;
+  const scale = Math.min(1, maxSide / Math.max(w, h)) || 1;
+  w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = 'sync';
+    const loaded = await new Promise((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = url;
+    });
+    if (!loaded) return null;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return await createImageBitmap(cv).catch(() => null);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function intakeImage(file) {
-  const bmp = await createImageBitmap(file).catch(() => null);
+  let bmp = await createImageBitmap(file).catch(() => null);
+  if (!bmp && (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || ''))) {
+    bmp = await rasterizeSVG(file).catch(() => null);
+  }
   if (!bmp) throw new Error(t('err.imageDecode'));
   S.src = {
     kind: 'image', name: file.name, size: file.size, bitmap: bmp,
@@ -644,7 +759,8 @@ function classifyPrompt() {
     'schematic = 原理或系统图：液压气动回路、电气原理、控制框图、工艺流程框图，用符号和连线表达系统关系，一般没有尺寸标注。',
     'photo = 实物照片或三维模型渲染图。',
     'code = 程序代码的截图或照片（如机床屏幕、打印稿）。',
-    'JSON 结构：{"class":"drawing|chart|schematic|photo|code","docType":"更具体的类型名","reason":"一句话判断依据","hasDimensions":true/false,"hasAxes":true/false}',
+    'irrelevant = 跟机械工程、材料科学完全无关的内容（人物、风景、动物、表情包、网页截图、与工程无关的日常照片等）。',
+    'JSON 结构：{"class":"drawing|chart|schematic|photo|code|irrelevant","docType":"更具体的类型名","reason":"一句话判断依据","hasDimensions":true/false,"hasAxes":true/false}',
   ].join('\n');
 }
 
@@ -668,7 +784,7 @@ function transcribePrompt(imgNote, alsoClassify) {
     RULES(),
     '',
     'JSON 结构：',
-    (alsoClassify ? '{"class":"drawing|chart|schematic|photo|code（drawing=工程图纸；chart=有坐标轴的数据图表；schematic=原理/回路/框图；photo=实物照片；code=程序代码截图）","docType":"更具体的类型名",' : '{') +
+    (alsoClassify ? '{"class":"drawing|chart|schematic|photo|code|irrelevant（drawing=工程图纸；chart=有坐标轴的数据图表；schematic=原理/回路/框图；photo=实物照片；code=程序代码截图；irrelevant=跟机械/材料工程完全无关的内容）","docType":"更具体的类型名",' : '{') +
     '"titleBlock":[{"field":"栏目名","value":"原文内容"}],' +
     '"items":[{"zone":"位置","kind":"尺寸|极限偏差|形位公差|粗糙度|基准|视图名|剖切符号|技术要求|件号|标题栏|螺纹|焊接|注释|其他","text":"原样文字"}],' +
     '"technicalNotes":["技术要求逐条原文"],' +
@@ -1109,6 +1225,7 @@ async function askVisionJSON(prompt, imgs, opts) {
 
 function mapClass(c) {
   const v = txt(c).toLowerCase();
+  if (v.indexOf('irrelevant') >= 0) return 'irrelevant';
   if (v.indexOf('chart') >= 0) return 'chart';
   if (v.indexOf('code') >= 0) return 'code';
   return 'drawing';
@@ -1131,7 +1248,9 @@ async function run(mode) {
   S.busy = true; S.abort = new AbortController(); syncRun();
   $('#reportState').textContent = TX(S.mode === 'teach' ? '教学解读' : '工程分析') + t('reportState.inProgress');
   try {
-    if (S.src.kind === 'image') await runVisual(); else await runCodeCore(S.src.text, null);
+    if (S.src.kind === 'image') await runVisual();
+    else if (S.src.isDocument) await runDocumentText(S.src.text);
+    else await runCodeCore(S.src.text, null);
     endProgress(true);
   } catch (e) {
     console.error(e);
@@ -1207,6 +1326,7 @@ async function runVisual() {
       }
     }
 
+    if (cls === 'irrelevant') { renderIrrelevantNotice(clsNote); return; }
     if (cls === 'auto') cls = 'drawing';   // 分类没给出结果时按工程图纸处理
     next(); ticker('');
     const mainPrompt = cls === 'chart'
@@ -1307,6 +1427,50 @@ async function runCodeCore(full, label) {
   finishReport('code', d, null, { extra: extra, planText: label ? t('plan.codeSource') + label : '' });
 }
 
+async function runDocumentText(full) {
+  await ensureLimits();
+  const wantMat = $('#optMaterial').checked;
+  const cap = (S.limits && S.limits.maxPromptBytes) || 65536;
+  const budget = cap - 9000;
+  const big = bytesOf(full) > budget;
+  const parts = big ? splitByBytes(full, budget - 3000, 6) : null;
+  const names = (big ? parts.map((p, i) => tf('step.chunk', { i: i + 1, n: parts.length })) : [])
+    .concat([t('step.main')]).concat(wantMat ? [t('step.material')] : [])
+    .concat([t(S.mode === 'teach' ? 'step.teach' : 'step.eng'), t('step.summary')]);
+  showProgress(names);
+  let idx = 0;
+  const next = () => setStep(idx++);
+
+  let digest = null;
+  if (big) {
+    digest = [];
+    for (let i = 0; i < parts.length; i++) {
+      next();
+      try { digest.push(await askJSON(chunkPrompt(i, parts.length, parts[i].text, parts[i].start), { modelTier: 'default', onText })); }
+      catch (e) { if (e && e.code === 'cancelled') throw e; digest.push({ range: '#' + parts[i].start + '+', purpose: '(pre-read failed)' }); }
+    }
+  }
+  next(); ticker('');
+  const head = big ? sliceBytes(full, budget - bytesOf(JSON.stringify(digest)) - 2000) : full;
+  const vector = digest ? sliceBytes(full, 4000) + '\n\n[分段摘要 JSON]\n' + sliceBytes(JSON.stringify(digest), 8000) : head;
+  const d = await askJSON(drawingPrompt('（这是一份 Word 文档转写出的纯文字内容，没有图片，请直接依据文字分析）', vector, ''), { modelTier: S.tier, onText });
+
+  let mat = null;
+  if (wantMat) {
+    next(); ticker('');
+    try { mat = await askJSON(materialPrompt(d, 'drawing'), { onText, modelTier: S.tier === 'quick' ? 'quick' : 'default' }); }
+    catch (e) { if (e && e.code === 'cancelled') throw e; toast(t('toast.materialFail') + errMsg(e), 5000); }
+  }
+
+  next(); ticker('');
+  let extra = null;
+  try { extra = await askJSON(extraPrompt(S.mode, 'drawing', d, ''), { onText, modelTier: S.tier }); }
+  catch (e) { if (e && e.code === 'cancelled') throw e; toast(t(S.mode === 'teach' ? 'toast.modeFail.teach' : 'toast.modeFail.eng') + errMsg(e), 5000); }
+
+  next();
+  finishReport('drawing', d, mat, { extra: extra, planText: t('plan.textOnly') });
+}
+
 function sliceBytes(s, max) {
   if (bytesOf(s) <= max) return s;
   let lo = 0, hi = s.length;
@@ -1358,6 +1522,30 @@ function renderNoVisionNotice() {
     '<div class="note-box">' + esc(t('novision.textOk')) + '</div>' +
     '</section>';
   $('#reportState').textContent = t('cap.imageUnavailable');
+}
+
+function renderIrrelevantNotice(clsNote) {
+  const docType = (clsNote && has(clsNote.docType)) ? clsNote.docType : '';
+  const reason = (clsNote && has(clsNote.reason)) ? clsNote.reason : '';
+  $('#frame').innerHTML =
+    '<div class="tblock"><div class="cell wide"><span class="k">' + esc(t('irrelevant.env')) + '</span>' +
+    '<span class="v">' + esc(t('irrelevant.title')) + '</span></div></div>' +
+    '<section class="sec"><div class="sec-h"><span class="n">01</span><h3>' + esc(t('irrelevant.what')) + '</h3>' +
+    '<span class="n-en">Diagnosis</span></div>' +
+    '<p class="lead">' + esc(t('irrelevant.lead')) + '</p>' +
+    (docType || reason ? '<div class="note-box">' +
+      (docType ? '<b>' + esc(t('irrelevant.identifiedAs')) + '：</b>' + esc(docType) + '　' : '') +
+      (reason ? esc(reason) : '') + '</div>' : '') +
+    '<div class="sub">' + esc(t('irrelevant.suggest')) + '</div>' +
+    '<ul class="bul">' +
+    '<li>' + esc(t('irrelevant.li1')) + '</li>' +
+    '<li>' + esc(t('irrelevant.li2')) + '</li>' +
+    '</ul>' +
+    '<div style="margin-top:16px"><button class="btn ghost" id="backDemoBtn" type="button">' + esc(t('novision.back')) + '</button></div>' +
+    '</section>';
+  S.demo = false;
+  $('#reportState').textContent = t('irrelevant.title');
+  toast(t('irrelevant.title'), 4500);
 }
 
 function showPlan(text) {

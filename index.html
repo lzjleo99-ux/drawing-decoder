@@ -1,53 +1,3 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{color-scheme:light dark}
-body{margin:0;font:14px system-ui,sans-serif}
-img{max-width:100%}
-[hidden]{display:none!important}
-.keybar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 20px;
-  background:var(--sheet2,#eef1f2);border-bottom:1px solid var(--line,#c4cfd4);font-size:12.5px}
-.keybar label{font-family:var(--f-mono,monospace);font-size:10px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--ink3,#798a92)}
-.keybar .field{display:flex;align-items:center;gap:8px;flex:1;min-width:230px}
-.keybar .field.narrow{flex:0 1 290px;min-width:170px}
-.keybar input{flex:1;min-width:0;font-family:var(--f-mono,monospace);font-size:12px;padding:6px 9px;
-  border:1px solid var(--line,#c4cfd4);border-radius:2px;background:var(--sheet,#fff);color:var(--ink,#0f1a21)}
-.keybar select{font-size:12px;padding:6px 8px;border:1px solid var(--line,#c4cfd4);border-radius:2px;
-  background:var(--sheet,#fff);color:var(--ink,#0f1a21);max-width:280px}
-.keybar button{font-size:12px;padding:6px 12px;border:1px solid var(--line,#c4cfd4);border-radius:2px;
-  background:var(--sheet,#fff);color:var(--ink,#0f1a21);cursor:pointer}
-.keybar button:hover{border-color:var(--accent,#14607f);color:var(--accent,#14607f)}
-.keystate{font-size:11.5px;color:var(--crit,#ae3722);flex-basis:100%}
-.keystate.ok{color:var(--ok,#25684d)}
-@media (max-width:560px){.keybar{padding-inline:14px}}
-</style>
-</head>
-<body>
-<div class="keybar">
-  <div class="field" id="apiKeyField">
-    <label for="apiKey">Anthropic Key</label>
-    <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-  </div>
-  <div class="field" id="dsApiKeyField" hidden>
-    <label for="dsApiKey">DeepSeek Key</label>
-    <input id="dsApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
-  </div>
-  <div class="field" id="zpApiKeyField" hidden>
-    <label for="zpApiKey">Zhipu Key</label>
-    <input id="zpApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
-  </div>
-  <div class="field narrow">
-    <input id="wsId" type="text" data-i18n-ph="bridge.wsPlaceholder" placeholder="Workspace ID (org-level keys only, wrkspc_...)" autocomplete="off" spellcheck="false">
-  </div>
-  <select id="modelSel" data-i18n-aria="bridge.modelAria" aria-label="Model"></select>
-  <button id="testBtn" type="button" data-i18n="bridge.testBtn">Test connection</button>
-  <button id="syncBtn" type="button" data-i18n="bridge.syncBtn">Sync to live site</button>
-  <span class="keystate" id="keyState"></span>
-</div>
 <title>机械图纸解译台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -477,7 +427,7 @@ body.mdd-admin #adminBtn{display:inline-flex}
         <div class="drop-s" data-i18n="drop.sub"></div>
         <div class="drop-f" data-i18n="drop.formats"></div>
       </div>
-      <input type="file" id="file" hidden accept="image/*,.pdf,.dxf,.txt,.nc,.gcode,.tap,.cnc,.iso,.mpf,.spf,.prg,.src,.mod,.st,.scl,.awl,.stl,.il,.lad,.ls,.bas,.for,.f,.asm,.pmc,.plc,.h,.csv,.log,.dat">
+      <input type="file" id="file" hidden accept="image/*,.pdf,.dxf,.docx,.txt,.nc,.gcode,.tap,.cnc,.iso,.mpf,.spf,.prg,.src,.mod,.st,.scl,.awl,.stl,.il,.lad,.ls,.bas,.for,.f,.asm,.pmc,.plc,.h,.csv,.log,.dat">
     </section>
 
     <section class="panel" id="srcPanel">
@@ -634,9 +584,5 @@ body.mdd-admin #adminBtn{display:inline-flex}
 <script src="i18n.js"></script>
 <script src="accounts.js"></script>
 <script src="auth.js"></script>
-<script src="local-bridge.js"></script>
 <script src="app.js"></script>
 <script src="admin.js"></script>
-
-</body>
-</html>
