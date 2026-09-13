@@ -30,7 +30,10 @@ const MODELS = [
   // 智谱只列能读图的两个：GLM-4.5-Air 是纯文本模型，不支持图片，所以没有放进来
   { id: 'glm-4.6v', name: 'GLM-4.6V', noteKey: 'bridge.note.glm46v', vendor: 'zhipu' },
   { id: 'glm-4.6v-flash', name: 'GLM-4.6V-Flash', noteKey: 'bridge.note.glm46vflash', vendor: 'zhipu' },
+  // 只有打开过别人给的分享链接、本机存了分享令牌时才会出现在下拉里
+  { id: 'claude-shared', name: 'Claude', noteKey: 'bridge.note.shared', vendor: 'shared', requiresShare: true },
 ];
+const isShared = (id) => id === 'claude-shared';
 const bridgeT = (k) => (typeof t === 'function' ? t(k) : k);
 const EFFORT = { quick: 'low', default: 'high', complex: 'xhigh' };
 const isDeepSeek = (id) => /^deepseek-/.test(id);
@@ -47,26 +50,55 @@ const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } cat
 const getModel = () => { try { return localStorage.getItem(LS_MODEL) || MODELS[0].id; } catch (e) { return MODELS[0].id; } };
 const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) {} };
 
-// 从「同步到线上网站」按钮打开的链接里取回 Key/模型设置，写入本页面的 localStorage
-let __syncImported = false;
-(function importSyncFromHash() {
-  const m = /(?:^|[?&#])sync=([^&]+)/.exec(location.hash) || /(?:^|[?&])sync=([^&]+)/.exec(location.search);
-  if (!m) return;
-  try {
-    const cfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
-    if (cfg.anthropicKey) setKey(cfg.anthropicKey);
-    if (cfg.dsKey) setDSKey(cfg.dsKey);
-    if (cfg.zpKey) setZPKey(cfg.zpKey);
-    if (cfg.wsId) setWS(cfg.wsId);
-    if (cfg.model) setModel(cfg.model);
-    __syncImported = true;
-  } catch (e) { console.warn('[bridge] sync 参数解析失败', e); }
-  // 清掉地址栏里的敏感参数，不留在浏览历史 / 地址栏截图里
-  try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&]sync=[^&]+/, '')); } catch (e) {}
-})();
 const LS_WS = 'mdd.local.workspace';
 const getWS = () => { try { return (localStorage.getItem(LS_WS) || '').trim(); } catch (e) { return ''; } };
 const setWS = (v) => { try { localStorage.setItem(LS_WS, v.trim()); } catch (e) {} };
+
+// 别人打开你的分享链接后，用这两项去走你的后端代理，而不是自己的 Key
+const LS_SHARE_TOKEN = 'mdd.local.sharetoken';
+const LS_SHARE_URL = 'mdd.local.shareurl';
+const LS_SHARE_LABEL = 'mdd.local.sharelabel';
+const getShareToken = () => { try { return (localStorage.getItem(LS_SHARE_TOKEN) || '').trim(); } catch (e) { return ''; } };
+const setShareToken = (v) => { try { localStorage.setItem(LS_SHARE_TOKEN, v.trim()); } catch (e) {} };
+const getShareWorkerUrl = () => { try { return (localStorage.getItem(LS_SHARE_URL) || '').trim(); } catch (e) { return ''; } };
+const setShareWorkerUrl = (v) => { try { localStorage.setItem(LS_SHARE_URL, v.trim()); } catch (e) {} };
+const getShareLabel = () => { try { return (localStorage.getItem(LS_SHARE_LABEL) || '').trim(); } catch (e) { return ''; } };
+const setShareLabel = (v) => { try { localStorage.setItem(LS_SHARE_LABEL, v.trim()); } catch (e) {} };
+const hasShareAccess = () => !!(getShareToken() && getShareWorkerUrl());
+
+// 从「同步到线上网站」按钮打开的链接里取回 Key/模型设置，写入本页面的 localStorage
+// （必须放在上面这些 get/set 定义之后：下面这个 IIFE 会用到它们，const 有暂时性死区，写反了会静默抛错）
+let __syncImported = false;
+let __shareImported = false;
+(function importSyncFromHash() {
+  const mSync = /(?:^|[?&#])sync=([^&]+)/.exec(location.hash) || /(?:^|[?&])sync=([^&]+)/.exec(location.search);
+  const mShare = /(?:^|[?&#])share=([^&]+)/.exec(location.hash) || /(?:^|[?&])share=([^&]+)/.exec(location.search);
+  if (mSync) {
+    try {
+      const cfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(mSync[1])))));
+      if (cfg.anthropicKey) setKey(cfg.anthropicKey);
+      if (cfg.dsKey) setDSKey(cfg.dsKey);
+      if (cfg.zpKey) setZPKey(cfg.zpKey);
+      if (cfg.wsId) setWS(cfg.wsId);
+      if (cfg.model) setModel(cfg.model);
+      __syncImported = true;
+    } catch (e) { console.warn('[bridge] sync 参数解析失败', e); }
+  }
+  if (mShare) {
+    try {
+      const cfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(mShare[1])))));
+      if (cfg.token && cfg.workerUrl) {
+        setShareToken(cfg.token); setShareWorkerUrl(cfg.workerUrl); setShareLabel(cfg.from || '');
+        setModel('claude-shared');
+        __shareImported = true;
+      }
+    } catch (e) { console.warn('[bridge] share 参数解析失败', e); }
+  }
+  // 清掉地址栏里的敏感参数，不留在浏览历史 / 地址栏截图里
+  if (mSync || mShare) {
+    try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&](sync|share)=[^&]+/, '')); } catch (e) {}
+  }
+})();
 const LS_PROFILE = 'mdd.local.profile';
 const getProfile = () => { try { return parseInt(localStorage.getItem(LS_PROFILE), 10) || 0; } catch (e) { return 0; } };
 const setProfile = (i) => { try { localStorage.setItem(LS_PROFILE, String(i)); } catch (e) {} };
@@ -133,35 +165,39 @@ function normalizeImages(imgs) {
   return Array.isArray(imgs) ? imgs : (imgs.length !== undefined ? Array.from(imgs) : [imgs]);
 }
 
-async function callAnthropic(model, turns, imgs, opts) {
-  const key = getKey();
-  if (!key) throw { code: 'no_anthropic_key', message: '还没有填 Anthropic API Key。在页面顶部输入以 sk-ant- 开头的密钥后再试。' };
-
-  const msgs = turns.map(t => ({ role: t.role, content: [{ type: 'text', text: String(t.content) }] }));
-  if (imgs.length) {
-    const last = msgs[msgs.length - 1];
-    const blocks = [];
-    for (const b of imgs) {
-      const type = b.type && /^image\/(png|jpeg|webp|gif)$/.test(b.type) ? b.type : 'image/png';
-      blocks.push({ type: 'image', source: { type: 'base64', media_type: type, data: await blobToB64(b) } });
+function anthropicMessages(turns, imgs) {
+  return (async () => {
+    const msgs = turns.map(t => ({ role: t.role, content: [{ type: 'text', text: String(t.content) }] }));
+    if (imgs.length) {
+      const last = msgs[msgs.length - 1];
+      const blocks = [];
+      for (const b of imgs) {
+        const type = b.type && /^image\/(png|jpeg|webp|gif)$/.test(b.type) ? b.type : 'image/png';
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: type, data: await blobToB64(b) } });
+      }
+      last.content = blocks.concat(last.content);
     }
-    last.content = blocks.concat(last.content);
-  }
+    return msgs;
+  })();
+}
 
+// Anthropic 原生请求，和经过分享代理转发的请求，body 构造与 SSE 解析完全一样，只是 url/header 不同
+async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, opts) {
+  const msgs = await anthropicMessages(turns, imgs);
   let res = null, err = null;
   for (let i = getProfile(); i < PROFILES.length; i++) {
     const body = buildBody(model, msgs, opts.modelTier, PROFILES[i]);
     let r;
     try {
-      r = await fetch(ANTHROPIC_URL, { method: 'POST', signal: opts.signal, headers: apiHeaders(key), body: JSON.stringify(body) });
+      r = await fetch(url, { method: 'POST', signal: opts.signal, headers: buildHeaders(), body: JSON.stringify(body) });
     } catch (e) {
       if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
-      throw { code: 'api_error', message: '连不上 api.anthropic.com（网络或代理问题）：' + (e && e.message ? e.message : e) };
+      throw { code: 'api_error', message: '连不上 ' + new URL(url).host + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
     }
     if (r.ok) { res = r; if (i !== getProfile()) { setProfile(i); console.info('[bridge] 采用参数档位：' + PROFILES[i].label); } break; }
     let j = null; try { j = await r.json(); } catch (e) {}
-    err = mapError('anthropic', r.status, j);
-    if (/credit balance|billing|Plans & Billing|authentication|api key|not permitted|does not have access/i.test(err.raw || '')) throw err;
+    err = mapError(vendor, r.status, j);
+    if (/credit balance|billing|Plans & Billing|authentication|api key|not permitted|does not have access|invalid or expired share token/i.test(err.raw || '')) throw err;
     if (r.status !== 400 || i === PROFILES.length - 1) throw err;
     console.warn('[bridge] 参数档位 "' + PROFILES[i].label + '" 被拒绝，降档重试。原因：' + err.raw);
   }
@@ -187,13 +223,27 @@ async function callAnthropic(model, turns, imgs, opts) {
         } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason === 'max_tokens') {
           truncated = true;
         } else if (ev.type === 'error') {
-          throw mapError('anthropic', 200, ev);
+          throw mapError(vendor, 200, ev);
         }
       }
     }
   }
   if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
   return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
+}
+
+async function callAnthropic(model, turns, imgs, opts) {
+  const key = getKey();
+  if (!key) throw { code: 'no_anthropic_key', message: '还没有填 Anthropic API Key。在页面顶部输入以 sk-ant- 开头的密钥后再试。' };
+  return await callAnthropicLike('anthropic', ANTHROPIC_URL, () => apiHeaders(key), model, turns, imgs, opts);
+}
+
+async function callShared(model, turns, imgs, opts) {
+  const workerUrl = getShareWorkerUrl(), token = getShareToken();
+  if (!workerUrl || !token) throw { code: 'no_share_config', message: '分享链接的配置不完整，请重新打开对方发给你的分享链接。' };
+  return await callAnthropicLike('shared', workerUrl.replace(/\/$/, '') + '/chat',
+    () => ({ 'content-type': 'application/json', authorization: 'Bearer ' + token }),
+    model, turns, imgs, opts);
 }
 
 async function callDeepSeek(model, turns, imgs, opts) {
@@ -325,6 +375,9 @@ async function callAPI(input, options) {
   const model = getModel();
   const imgs = normalizeImages(opts.images);
 
+  if (isShared(model)) {
+    return await callShared(model === 'claude-shared' ? 'claude-opus-5' : model, turns, imgs, opts);
+  }
   if (isZhipu(model)) {
     return await callZhipu(model, turns, imgs, opts); // 列表里的智谱模型全部支持图片，不需要 fallback
   }
@@ -379,11 +432,12 @@ window.claude = {
 /* ---- 顶部的 Key / 模型工具条 ---- */
 function renderModelOptions(sel) {
   const cur = sel.value || getModel();
-  sel.innerHTML = MODELS.map(m => {
+  const shown = MODELS.filter(m => !m.requiresShare || hasShareAccess());
+  sel.innerHTML = shown.map(m => {
     const nameShown = m.name + (m.textOnly ? bridgeT('bridge.textOnlySuffix') : '');
     return '<option value="' + m.id + '">' + nameShown + ' — ' + bridgeT(m.noteKey) + '</option>';
   }).join('');
-  sel.value = cur;
+  sel.value = shown.some(m => m.id === cur) ? cur : (shown[0] && shown[0].id);
 }
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -406,10 +460,12 @@ document.addEventListener('DOMContentLoaded', function () {
   if (dsInput) dsInput.value = getDSKey();
   if (zpInput) zpInput.value = getZPKey();
 
+  const apiKeyField = document.getElementById('apiKeyField');
   const syncVendorUI = () => {
     const m = getModel();
     if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
     if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
+    if (apiKeyField) apiKeyField.hidden = isShared(m); // 用分享链接进来的，不用填自己的 Key
   };
 
   const syncBtn = document.getElementById('syncBtn');
@@ -438,7 +494,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const dsOk = /^sk-/.test(getDSKey());
     const zpOk = getZPKey().length > 10;
     const T = bridgeT;
-    if (zp) {
+    if (isShared(model)) {
+      const label = getShareLabel();
+      state.textContent = T('bridge.sharedActive') + (label ? '（' + label + '）' : '');
+      state.className = 'keystate ok';
+    } else if (zp) {
       state.textContent = zpOk ? T('bridge.zpSaved') : T('bridge.zpNeedKey');
       state.className = zpOk ? 'keystate ok' : 'keystate';
     } else if (!ds) {

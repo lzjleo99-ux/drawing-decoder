@@ -383,6 +383,38 @@ body.mdd-unlocked #authGate{display:none}
 .authcredit{margin-top:12px;font-size:11px;text-align:center;line-height:1.5}
 .authcredit a{color:var(--ink3)}
 .authcredit a:hover{color:var(--accent)}
+
+/* ---------- admin entry + modal ---------- */
+#adminBtn{display:none}
+body.mdd-admin #adminBtn{display:inline-flex}
+.modalOverlay{position:fixed;inset:0;z-index:150;display:flex;align-items:center;justify-content:center;
+  background:rgba(15,26,33,.55);padding:20px}
+.modalBox{width:100%;max-width:640px;max-height:86vh;overflow-y:auto;background:var(--sheet);
+  border:1px solid var(--line2);border-radius:3px;box-shadow:var(--shadow);padding:22px 24px}
+.modalHead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.modalHead h2{font-size:17px;font-weight:700}
+.modalClose{background:none;border:0;font-size:22px;line-height:1;color:var(--ink3);cursor:pointer;padding:2px 6px}
+.modalClose:hover{color:var(--ink)}
+.modalTabs{display:flex;border-bottom:1px solid var(--line2);margin-bottom:16px;gap:4px}
+.modalTab{background:none;border:0;border-bottom:2px solid transparent;padding:7px 4px;margin-right:14px;
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);cursor:pointer}
+.modalTab[aria-pressed="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+.adminTable{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px;min-width:420px}
+.adminTable th{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);
+  text-align:left;font-weight:500;padding:5px 8px 5px 0;border-bottom:1px solid var(--line2)}
+.adminTable td{padding:6px 8px 6px 0;border-bottom:1px dashed var(--line);color:var(--ink2)}
+.adminTable .adminEmpty{color:var(--ink3);text-align:center;padding:10px 0}
+.adminForm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.adminForm input[type=text],.adminForm input[type=password]{flex:1;min-width:120px;font-size:13px;padding:7px 9px;
+  border:1px solid var(--line);border-radius:2px;background:var(--sheet2);color:var(--ink)}
+.adminForm select{font-size:13px;padding:7px 8px;border:1px solid var(--line);border-radius:2px;
+  background:var(--sheet2);color:var(--ink)}
+.adminCheck{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);white-space:nowrap}
+.adminNote{font-size:11.5px;color:var(--ink3);line-height:1.55;margin-bottom:12px}
+.shareLinkBox{display:flex;gap:8px;margin-bottom:16px}
+.shareLinkBox input{flex:1;font-family:var(--f-mono);font-size:11.5px;padding:7px 9px;border:1px solid var(--line);
+  border-radius:2px;background:var(--sheet2);color:var(--ink)}
+@media (max-width:560px){.modalBox{padding:18px 16px}}
 </style>
 
 <div id="authGate">
@@ -423,6 +455,7 @@ body.mdd-unlocked #authGate{display:none}
   <div class="top-actions">
     <select class="langsel" id="langSel" aria-label="Language"></select>
     <span class="cap" id="capState"><i></i><span data-i18n="cap.connecting"></span></span>
+    <button class="btn ghost sm" id="adminBtn" type="button" data-i18n="admin.button"></button>
     <button class="btn ghost sm" id="logoutBtn" type="button" data-i18n="auth.logout"></button>
   </div>
 </header>
@@ -542,11 +575,68 @@ body.mdd-unlocked #authGate{display:none}
 
 <div id="printhost" aria-hidden="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
+
+<div id="adminModal" class="modalOverlay" hidden>
+  <div class="modalBox">
+    <div class="modalHead">
+      <h2 data-i18n="admin.title"></h2>
+      <button class="modalClose" id="adminClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modalTabs">
+      <button type="button" class="modalTab" data-tab="accounts" aria-pressed="true" data-i18n="admin.tab.accounts"></button>
+      <button type="button" class="modalTab" data-tab="share" aria-pressed="false" data-i18n="admin.tab.share"></button>
+    </div>
+
+    <section class="modalPane" id="paneAccounts">
+      <div class="tw"><table class="adminTable" id="accountsTable"><thead><tr>
+        <th data-i18n="admin.col.user"></th><th data-i18n="admin.col.label"></th>
+        <th data-i18n="admin.col.admin"></th><th></th>
+      </tr></thead><tbody id="accountsBody"></tbody></table></div>
+      <div class="adminForm">
+        <input id="newUser" type="text" data-i18n-ph="admin.ph.user" placeholder="" autocomplete="off" spellcheck="false">
+        <input id="newPass" type="text" data-i18n-ph="admin.ph.pass" placeholder="" autocomplete="off" spellcheck="false">
+        <input id="newLabel" type="text" data-i18n-ph="admin.ph.label" placeholder="" autocomplete="off" spellcheck="false">
+        <label class="adminCheck"><input id="newAdmin" type="checkbox"> <span data-i18n="admin.col.admin"></span></label>
+        <button class="btn sm" id="addAccountBtn" type="button" data-i18n="admin.addAccount"></button>
+      </div>
+      <button class="btn ghost sm" id="downloadAccountsBtn" type="button" data-i18n="admin.download"></button>
+      <p class="adminNote" data-i18n="admin.accountsNote"></p>
+    </section>
+
+    <section class="modalPane" id="paneShare" hidden>
+      <p class="adminNote" data-i18n="admin.workerNote"></p>
+      <div class="adminForm">
+        <input id="workerUrlInput" type="text" data-i18n-ph="admin.ph.workerUrl" placeholder="" autocomplete="off" spellcheck="false">
+        <input id="adminSecretInput" type="password" data-i18n-ph="admin.ph.adminSecret" placeholder="" autocomplete="off" spellcheck="false">
+        <button class="btn ghost sm" id="saveWorkerCfgBtn" type="button" data-i18n="admin.saveConfig"></button>
+      </div>
+      <div class="adminForm">
+        <input id="shareLabelInput" type="text" data-i18n-ph="admin.ph.shareLabel" placeholder="" autocomplete="off" spellcheck="false">
+        <select id="shareTtlSelect">
+          <option value="24" data-i18n="admin.ttl.1d"></option>
+          <option value="168" selected data-i18n="admin.ttl.7d"></option>
+          <option value="720" data-i18n="admin.ttl.30d"></option>
+        </select>
+        <button class="btn sm" id="mintShareBtn" type="button" data-i18n="admin.generateLink"></button>
+      </div>
+      <div class="shareLinkBox" id="shareLinkBox" hidden>
+        <input id="shareLinkOutput" type="text" readonly>
+        <button class="btn ghost sm" id="copyShareLinkBtn" type="button" data-i18n="admin.copyLink"></button>
+      </div>
+      <div class="tw"><table class="adminTable" id="sharesTable"><thead><tr>
+        <th data-i18n="admin.col.label"></th><th data-i18n="admin.col.expires"></th>
+        <th data-i18n="admin.col.status"></th><th></th>
+      </tr></thead><tbody id="sharesBody"></tbody></table></div>
+    </section>
+  </div>
 </div>
+
 <script src="i18n.js"></script>
+<script src="accounts.js"></script>
 <script src="auth.js"></script>
 <script src="local-bridge.js"></script>
 <script src="app.js"></script>
+<script src="admin.js"></script>
 
 </body>
 </html>
