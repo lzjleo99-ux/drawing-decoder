@@ -54,7 +54,7 @@ const UI = {
   "ask.aria":{zh:"追问内容",en:"Follow-up question",sr:"Dodatno pitanje"},
   "btn.ask":{zh:"提问",en:"Ask",sr:"Pitaj"},
   "intro.text":{zh:"机械图纸解译台：把机械工程图纸、数据图表或老设备的控制程序拖进来，AI 会逐条读懂结构、公差、工作原理与材料性能，教学或工程两种视角都可以生成，并能导出可直接归档的分析报告。",en:"Drawing Decoder reads mechanical drawings, engineering charts and legacy machine-control code — it explains structure, tolerances, working principles and material properties in a teaching or engineering view, and exports an archive-ready PDF report.",sr:"Drawing Decoder analizira mašinske crteže, inženjerske grafikone i programe starih upravljačkih sistema — objašnjava strukturu, tolerancije, princip rada i svojstva materijala u nastavnom ili inženjerskom režimu, i izvozi izveštaj spreman za arhivu u PDF formatu."},
-  "intro.contact":{zh:"维护邮箱",en:"Support",sr:"Podrška"},
+  "intro.credit":{zh:"诺维萨德大学技术科学学院 · Dr. Marko Vilotić 团队出品",en:"Faculty of Technical Sciences, University of Novi Sad · produced by Dr. Marko Vilotić\u2019s team",sr:"Fakultet tehni\u010dkih nauka, Univerzitet u Novom Sadu \u00b7 autorski tim dr Marka Viloti\u0107a"},
   "auth.title":{zh:"访问受限",en:"Restricted Access",sr:"Ograničen pristup"},
   "auth.sub":{zh:"请输入用户名和密码继续",en:"Enter your username and password to continue",sr:"Unesite korisničko ime i lozinku za nastavak"},
   "auth.user":{zh:"用户名",en:"Username",sr:"Korisničko ime"},
@@ -212,6 +212,10 @@ const UI = {
   "bridge.err.empty":{zh:"模型没有返回内容",en:"The model returned no content",sr:"Model nije vratio sadržaj"},
   "bridge.err.reasoningOnly":{zh:"（只输出了思维链，未给出最终答案）",en:" (only reasoning was returned, no final answer)",sr:" (vraćeno je samo rezonovanje, bez konačnog odgovora)"},
   "bridge.err.cancelled":{zh:"已中止",en:"Stopped",sr:"Prekinuto"},
+  "bridge.note.glm46v":{zh:"智谱旗舰视觉模型，识图能力强，128K 上下文",en:"Zhipu\u2019s flagship vision model, strong image reading, 128K context",sr:"Zhipu-ov vode\u0107i vizuelni model, jako dobro \u010dita slike, 128K konteksta"},
+  "bridge.note.glm46vflash":{zh:"同代更快更省的识图模型，128K 上下文",en:"Faster, cheaper vision model from the same generation, 128K context",sr:"Br\u017ei i jeftiniji vizuelni model iz iste generacije, 128K konteksta"},
+  "bridge.zpSaved":{zh:"Zhipu Key 已保存",en:"Zhipu key saved",sr:"Zhipu klju\u010d je sa\u010duvan"},
+  "bridge.zpNeedKey":{zh:"还没填 Zhipu Key（bigmodel.cn/usercenter/apikeys）",en:"Zhipu key not set yet (bigmodel.cn/usercenter/apikeys)",sr:"Zhipu klju\u010d jo\u0161 nije unet (bigmodel.cn/usercenter/apikeys)"},
   "disclaimer.html":{zh:"<b>阅读提示：</b>本报告由 AI 依据所提供的图像/代码自动识读生成，尺寸、公差与材料数据可能存在识别误差，<b>不能替代原始图纸、材料标准与设计校核</b>。用于加工、采购或验收前，请以受控版本的图纸和材料质保书为准。",en:"<b>Note:</b> this report is generated automatically by AI from the image/code provided. Dimensions, tolerances and material data may contain recognition errors and <b>cannot replace the original drawing, material standards or design verification</b>. Before manufacturing, purchasing or acceptance, use the controlled drawing and material certificates.",sr:"<b>Napomena:</b> ovaj izveštaj automatski generiše AI na osnovu priložene slike/koda. Dimenzije, tolerancije i podaci o materijalu mogu sadržati greške u prepoznavanju i <b>ne mogu zameniti originalni crtež, standarde materijala niti proveru projekta</b>. Pre izrade, nabavke ili prijema, koristi kontrolisanu verziju crteža i ateste materijala."},
   "auth.note":{zh:"本页面为前端演示锁，仅用于阻挡随意访客，并非完整的账户系统。",en:"This is a front-end demo lock meant to deter casual visitors — it is not a full account system.",sr:"Ovo je jednostavna zaštita na strani klijenta koja odvraća slučajne posetioce — nije potpuni sistem naloga."}
 };

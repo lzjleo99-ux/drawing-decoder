@@ -36,6 +36,10 @@ img{max-width:100%}
     <label for="dsApiKey">DeepSeek Key</label>
     <input id="dsApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
   </div>
+  <div class="field" id="zpApiKeyField" hidden>
+    <label for="zpApiKey">Zhipu Key</label>
+    <input id="zpApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+  </div>
   <div class="field narrow">
     <input id="wsId" type="text" data-i18n-ph="bridge.wsPlaceholder" placeholder="Workspace ID (org-level keys only, wrkspc_...)" autocomplete="off" spellcheck="false">
   </div>
@@ -276,10 +280,10 @@ ol.flow li::before{content:counter(f);position:absolute;left:0;top:1px;font-fami
 .mat-h .s{font-family:var(--f-mono);font-size:10.5px;color:var(--brass);border:1px solid var(--brass);padding:1px 7px}
 .mat-h .c{font-size:12px;color:var(--ink3)}
 .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px 26px;margin-top:12px}
-.prop{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px dashed var(--line)}
+.prop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px dashed var(--line)}
 .prop .pn{color:var(--ink2);min-width:0}
-.prop .pv{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
-.prop .pc{display:block;font-family:var(--f-body);font-size:10.5px;color:var(--ink3);font-weight:400;text-align:right}
+.prop .pv{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500;min-width:0;max-width:60%;text-align:right}
+.prop .pc{display:block;font-family:var(--f-body);font-size:10.5px;color:var(--ink3);font-weight:400;text-align:right;white-space:normal}
 
 /* risk */
 .risk{border:1px solid var(--line);border-left:3px solid var(--ink3);padding:10px 13px;margin-top:9px;background:var(--sheet2);border-radius:2px}
@@ -347,7 +351,7 @@ ol.flow li::before{content:counter(f);position:absolute;left:0;top:1px;font-fami
 .intro{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding-block:8px;padding-inline:20px;
   background:var(--sheet2);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink2);line-height:1.6}
 .intro p{flex:1;min-width:240px;max-width:86ch}
-.intro .mail{flex:none;font-family:var(--f-mono);font-size:11px;color:var(--ink3);white-space:nowrap}
+.intro .mail{flex:none;max-width:100%;font-family:var(--f-mono);font-size:11px;color:var(--ink3);white-space:normal;text-align:right}
 .intro .mail a{color:var(--ink3)}
 .intro .mail a:hover{color:var(--accent)}
 @media (max-width:560px){.intro{padding-inline:14px}}
@@ -397,7 +401,7 @@ body.mdd-unlocked #authGate{display:none}
       </g>
     </svg>
     <div>
-      <h1>机械图纸解译台</h1>
+      <h1 data-i18n="brand.name">机械图纸解译台</h1>
       <p class="tag">Drawing Decoder</p>
     </div>
   </div>
@@ -409,7 +413,7 @@ body.mdd-unlocked #authGate{display:none}
 
 <div class="intro">
   <p data-i18n="intro.text"></p>
-  <span class="mail"><span data-i18n="intro.contact"></span>: <a href="mailto:info@chinayytech.com">info@chinayytech.com</a></span>
+  <span class="mail"><a href="https://www.uns.ac.rs/index.php/en/faculties/ffaculties/faculty-technical-sciences" target="_blank" rel="noopener" data-i18n="intro.credit"></a></span>
 </div>
 
 <main class="wrap">

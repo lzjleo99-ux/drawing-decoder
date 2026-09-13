@@ -11,9 +11,13 @@ const SYNC_TARGET_URL = 'https://lzjleo99-ux.github.io/drawing-decoder/';
 
 const LS_KEY = 'mdd.local.apikey';
 const LS_DS_KEY = 'mdd.local.dskey';
+const LS_ZP_KEY = 'mdd.local.zpkey';
 const LS_MODEL = 'mdd.local.model';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+// 智谱走国内这个域名：api.z.ai（国际站）的浏览器预检没有返回 CORS 头，直连会被浏览器拦下；
+// open.bigmodel.cn 实测预检正常，同一套 Key/模型可用。
+const ZHIPU_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const ANTHROPIC_FALLBACK_MODEL = 'claude-opus-5'; // DeepSeek 不支持图片，图片调用自动改走这个
 
 const MODELS = [
@@ -23,17 +27,23 @@ const MODELS = [
   { id: 'deepseek-chat', name: 'DeepSeek V3', noteKey: 'bridge.note.dschat', textOnly: true, vendor: 'deepseek' },
   { id: 'deepseek-reasoner', name: 'DeepSeek R1', noteKey: 'bridge.note.dsreasoner', textOnly: true, vendor: 'deepseek' },
   { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', noteKey: 'bridge.note.dsflash', vendor: 'deepseek' },
+  // 智谱只列能读图的两个：GLM-4.5-Air 是纯文本模型，不支持图片，所以没有放进来
+  { id: 'glm-4.6v', name: 'GLM-4.6V', noteKey: 'bridge.note.glm46v', vendor: 'zhipu' },
+  { id: 'glm-4.6v-flash', name: 'GLM-4.6V-Flash', noteKey: 'bridge.note.glm46vflash', vendor: 'zhipu' },
 ];
 const bridgeT = (k) => (typeof t === 'function' ? t(k) : k);
 const EFFORT = { quick: 'low', default: 'high', complex: 'xhigh' };
 const isDeepSeek = (id) => /^deepseek-/.test(id);
+const isZhipu = (id) => /^glm-/.test(id);
 const VISION_DEEPSEEK = ['deepseek-flash'];   // 其余 DeepSeek 模型（V3/R1）不认图片
-const visionCapable = (id) => !isDeepSeek(id) || VISION_DEEPSEEK.indexOf(id) >= 0;
+const visionCapable = (id) => !isDeepSeek(id) || VISION_DEEPSEEK.indexOf(id) >= 0; // 智谱这里只列了会读图的型号，全部为 true
 
 const getKey = () => { try { return localStorage.getItem(LS_KEY) || ''; } catch (e) { return ''; } };
 const setKey = (v) => { try { localStorage.setItem(LS_KEY, v); } catch (e) {} };
 const getDSKey = () => { try { return localStorage.getItem(LS_DS_KEY) || ''; } catch (e) { return ''; } };
 const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } catch (e) {} };
+const getZPKey = () => { try { return localStorage.getItem(LS_ZP_KEY) || ''; } catch (e) { return ''; } };
+const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } catch (e) {} };
 const getModel = () => { try { return localStorage.getItem(LS_MODEL) || MODELS[0].id; } catch (e) { return MODELS[0].id; } };
 const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) {} };
 
@@ -46,6 +56,7 @@ let __syncImported = false;
     const cfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
     if (cfg.anthropicKey) setKey(cfg.anthropicKey);
     if (cfg.dsKey) setDSKey(cfg.dsKey);
+    if (cfg.zpKey) setZPKey(cfg.zpKey);
     if (cfg.wsId) setWS(cfg.wsId);
     if (cfg.model) setModel(cfg.model);
     __syncImported = true;
@@ -247,12 +258,76 @@ async function callDeepSeek(model, turns, imgs, opts) {
   return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
 }
 
+async function callZhipu(model, turns, imgs, opts) {
+  const key = getZPKey();
+  if (!key) throw { code: 'no_zhipu_key', message: '还没有填智谱 API Key。在页面顶部「Zhipu Key」里输入后再试，或把模型换回 Claude。' };
+
+  const msgs = turns.map(t => ({ role: t.role, content: String(t.content) }));
+  if (imgs.length) {
+    // 跟 DeepSeek 一样是 OpenAI 兼容格式：最后一条 user 消息换成图文混排数组
+    const last = msgs[msgs.length - 1];
+    const parts = [{ type: 'text', text: last.content }];
+    for (const b of imgs) {
+      const type = b.type && /^image\/(png|jpeg|webp|gif)$/.test(b.type) ? b.type : 'image/png';
+      parts.push({ type: 'image_url', image_url: { url: 'data:' + type + ';base64,' + await blobToB64(b) } });
+    }
+    last.content = parts;
+  }
+  const body = { model: model, messages: msgs, stream: true, max_tokens: 8192 };
+
+  let r;
+  try {
+    r = await fetch(ZHIPU_URL, {
+      method: 'POST',
+      signal: opts.signal,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
+    throw { code: 'api_error', message: '连不上 open.bigmodel.cn（网络或代理问题）：' + (e && e.message ? e.message : e) };
+  }
+  if (!r.ok) {
+    let j = null; try { j = await r.json(); } catch (e) {}
+    throw mapError('zhipu', r.status, j);
+  }
+
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = '', text = '', truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      for (const line of chunk.split('\n')) {
+        if (line.indexOf('data:') !== 0) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+        const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
+        if (d && d.content) {
+          text += d.content;
+          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) {} }
+        }
+        if (ev.choices && ev.choices[0] && ev.choices[0].finish_reason === 'length') truncated = true;
+      }
+    }
+  }
+  if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
+  return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
+}
+
 async function callAPI(input, options) {
   const opts = options || {};
   const turns = typeof input === 'string' ? [{ role: 'user', content: String(input) }] : input.slice();
   const model = getModel();
   const imgs = normalizeImages(opts.images);
 
+  if (isZhipu(model)) {
+    return await callZhipu(model, turns, imgs, opts); // 列表里的智谱模型全部支持图片，不需要 fallback
+  }
   if (isDeepSeek(model)) {
     if (imgs.length && !visionCapable(model)) {
       // 这个 DeepSeek 模型不认图片：透明地改走 Anthropic，其余调用仍按你选的 DeepSeek 模型走
@@ -314,6 +389,7 @@ function renderModelOptions(sel) {
 document.addEventListener('DOMContentLoaded', function () {
   const input = document.getElementById('apiKey');
   const dsInput = document.getElementById('dsApiKey');
+  const zpInput = document.getElementById('zpApiKey');
   const sel = document.getElementById('modelSel');
   const state = document.getElementById('keyState');
   const ws = document.getElementById('wsId');
@@ -328,10 +404,12 @@ document.addEventListener('DOMContentLoaded', function () {
   sel.value = getModel();
   input.value = getKey();
   if (dsInput) dsInput.value = getDSKey();
+  if (zpInput) zpInput.value = getZPKey();
 
   const syncVendorUI = () => {
-    const ds = isDeepSeek(getModel());
-    if (dsInput) dsInput.parentElement.hidden = !ds;
+    const m = getModel();
+    if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
+    if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
   };
 
   const syncBtn = document.getElementById('syncBtn');
@@ -341,8 +419,8 @@ document.addEventListener('DOMContentLoaded', function () {
       syncBtn.hidden = true;
     } else {
       syncBtn.addEventListener('click', () => {
-        const cfg = { anthropicKey: getKey(), dsKey: getDSKey(), wsId: getWS(), model: getModel() };
-        if (!cfg.anthropicKey && !cfg.dsKey) { alert(bridgeT('bridge.syncNoKey')); return; }
+        const cfg = { anthropicKey: getKey(), dsKey: getDSKey(), zpKey: getZPKey(), wsId: getWS(), model: getModel() };
+        if (!cfg.anthropicKey && !cfg.dsKey && !cfg.zpKey) { alert(bridgeT('bridge.syncNoKey')); return; }
         const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
         window.open(SYNC_TARGET_URL + '#sync=' + encoded, '_blank');
         state.textContent = bridgeT('bridge.syncOpened');
@@ -354,11 +432,16 @@ document.addEventListener('DOMContentLoaded', function () {
   const paint = () => {
     const model = getModel();
     const ds = isDeepSeek(model);
+    const zp = isZhipu(model);
     const vision = visionCapable(model);
     const aOk = /^sk-ant-/.test(getKey());
     const dsOk = /^sk-/.test(getDSKey());
+    const zpOk = getZPKey().length > 10;
     const T = bridgeT;
-    if (!ds) {
+    if (zp) {
+      state.textContent = zpOk ? T('bridge.zpSaved') : T('bridge.zpNeedKey');
+      state.className = zpOk ? 'keystate ok' : 'keystate';
+    } else if (!ds) {
       state.textContent = aOk
         ? T('bridge.saved') + (getWS() ? '（' + T('auth.workspace') + ' ' + getWS().slice(0, 18) + '…）' : '')
         : T('bridge.needKey');
@@ -380,7 +463,7 @@ document.addEventListener('DOMContentLoaded', function () {
     try {
       const r = await callAPI('只回答两个字：可用', { modelTier: 'quick' });
       state.textContent = T('bridge.connected') + r.text.trim().slice(0, 12) + '」' +
-        (isDeepSeek(getModel()) ? '' : ' · ' + T('bridge.profileLabel') + ' ' + PROFILES[getProfile()].label);
+        ((isDeepSeek(getModel()) || isZhipu(getModel())) ? '' : ' · ' + T('bridge.profileLabel') + ' ' + PROFILES[getProfile()].label);
       state.className = 'keystate ok';
     } catch (e) {
       state.textContent = T('bridge.failed') + (e && e.message ? e.message : lastError || T('bridge.unknownError'));
@@ -393,11 +476,16 @@ document.addEventListener('DOMContentLoaded', function () {
     dsInput.addEventListener('change', () => { setDSKey(dsInput.value); paint(); });
     dsInput.addEventListener('blur', () => { setDSKey(dsInput.value); paint(); });
   }
+  if (zpInput) {
+    zpInput.addEventListener('change', () => { setZPKey(zpInput.value); paint(); });
+    zpInput.addEventListener('blur', () => { setZPKey(zpInput.value); paint(); });
+  }
   sel.addEventListener('change', () => { setModel(sel.value); paint(); });
   renderModelOptions(sel); // 若刚从本地页面同步过来，模型可能变了，重新按当前值渲染下拉
   sel.value = getModel();
   input.value = getKey();
   if (dsInput) dsInput.value = getDSKey();
+  if (zpInput) zpInput.value = getZPKey();
   if (ws) ws.value = getWS();
   paint();
   if (__syncImported) { state.textContent = bridgeT('bridge.imported'); state.className = 'keystate ok'; }
