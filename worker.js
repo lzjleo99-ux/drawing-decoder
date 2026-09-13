@@ -1,10 +1,16 @@
 /* Drawing Decoder API 分享代理 —— 部署在 Cloudflare Workers 上。
-   作用：你的真实 Anthropic Key 只存在这里（Worker Secret），从不进入任何访客的浏览器。
-   访客的浏览器只拿到一个"分享令牌"，这个 Worker 校验令牌有效后，代它去调 Anthropic，
-   再把结果原样转发回去——所以拿到分享链接的人能"用"，但打开开发者工具也看不到你的真 Key。
+   作用：你的真实智谱（Zhipu）Key 只存在这里（Worker Secret），从不进入任何访客的浏览器。
+   访客的浏览器只拿到一个"分享令牌"，这个 Worker 校验令牌有效后，代它去调智谱 GLM，
+   再把结果转换成前端认识的格式转发回去——所以拿到分享链接的人能"用"，但打开开发者工具
+   也看不到你的真 Key。
+
+   前端（app.js / local-bridge.js）说的是 Anthropic Messages API 那一套请求/流式格式，
+   这个 Worker 负责把它翻译成智谱的 OpenAI 兼容格式去请求，再把智谱的流式返回翻译回
+   Anthropic 的格式转发给前端——前端完全不用改，只当自己在跟一个"叫 Claude 的模型"说话。
 
    需要的环境变量（在 Cloudflare 控制台 → Workers → 这个 Worker → Settings → Variables）：
-     ANTHROPIC_KEY  (Secret)  你的真实 Anthropic API Key
+     ZHIPU_KEY      (Secret)  你的真实智谱 API Key（open.bigmodel.cn 申请的那个）
+     ZHIPU_MODEL    (可选，Text)  实际调用的智谱模型名，不填默认 glm-4.6v
      ADMIN_SECRET   (Secret)  一段随机字符串，只有你的管理面板知道，用来生成/吊销分享链接
    需要绑定的存储（Settings → Bindings → KV Namespace）：
      SHARE_TOKENS   变量名必须是这个，指向一个新建的 KV 命名空间，用来记录发出去的分享令牌 */
@@ -98,7 +104,75 @@ async function handleList(request, env, cors) {
   return json({ shares: out }, 200, cors);
 }
 
-// 真正的转发：校验令牌（或管理员本人），代为调用 Anthropic，把结果（含流式 SSE）原样转发回去
+// 把前端发来的 Anthropic Messages 格式请求体，转换成智谱（OpenAI 兼容）格式
+function toZhipuBody(anthropicBody, model) {
+  const msgs = (anthropicBody.messages || []).map((m) => {
+    const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content || '') }];
+    const hasImage = blocks.some((b) => b.type === 'image');
+    if (!hasImage) {
+      return { role: m.role, content: blocks.map((b) => String(b.text || '')).join('') };
+    }
+    const parts = blocks.map((b) => {
+      if (b.type === 'image') {
+        const src = b.source || {};
+        const mime = src.media_type || 'image/png';
+        return { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + src.data } };
+      }
+      return { type: 'text', text: String(b.text || '') };
+    });
+    return { role: m.role, content: parts };
+  });
+  return {
+    model: model,
+    messages: msgs,
+    stream: true,
+    max_tokens: anthropicBody.max_tokens || 8192,
+  };
+}
+
+// 把智谱的流式 SSE（OpenAI 兼容的 choices[0].delta.content）翻译成
+// 前端解析器认识的 Anthropic 流式事件（content_block_delta / text_delta）
+function zhipuStreamToAnthropic(upstreamBody) {
+  const reader = upstreamBody.getReader();
+  const dec = new TextDecoder();
+  const enc = new TextEncoder();
+  let buf = '';
+  return new ReadableStream({
+    async pull(controller) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) { controller.close(); return; }
+        buf += dec.decode(value, { stream: true });
+        let i, emitted = false;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+          for (const line of chunk.split('\n')) {
+            if (line.indexOf('data:') !== 0) continue;
+            const raw = line.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+            const choice = ev.choices && ev.choices[0];
+            const delta = choice && choice.delta;
+            if (delta && delta.content) {
+              const out = { type: 'content_block_delta', delta: { type: 'text_delta', text: delta.content } };
+              controller.enqueue(enc.encode('data: ' + JSON.stringify(out) + '\n\n'));
+              emitted = true;
+            }
+            if (choice && choice.finish_reason === 'length') {
+              const out = { type: 'message_delta', delta: { stop_reason: 'max_tokens' } };
+              controller.enqueue(enc.encode('data: ' + JSON.stringify(out) + '\n\n'));
+              emitted = true;
+            }
+          }
+        }
+        if (emitted) return;
+      }
+    },
+  });
+}
+
+// 真正的转发：校验令牌（或管理员本人），把 Anthropic 格式的请求转换成智谱格式代为调用，
+// 再把智谱的流式返回转换回 Anthropic 格式转发回去
 async function handleChat(request, env, cors) {
   const auth = request.headers.get('Authorization') || '';
   const token = auth.replace(/^Bearer\s+/i, '');
@@ -111,18 +185,32 @@ async function handleChat(request, env, cors) {
     }
   }
   if (!allowed) return json({ error: { message: 'invalid or expired share token' } }, 401, cors);
-  if (!env.ANTHROPIC_KEY) return json({ error: { message: 'ANTHROPIC_KEY 没有配置，先在 Worker 设置里加这个 Secret' } }, 500, cors);
+  if (!env.ZHIPU_KEY) return json({ error: { message: 'ZHIPU_KEY 没有配置，先在 Worker 设置里加这个 Secret' } }, 500, cors);
 
-  const body = await request.text();
-  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': env.ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body,
-  });
-  const headers = Object.assign({}, cors, { 'content-type': upstream.headers.get('content-type') || 'application/json' });
-  return new Response(upstream.body, { status: upstream.status, headers });
+  let anthropicBody;
+  try { anthropicBody = JSON.parse(await request.text()); }
+  catch (e) { return json({ error: { message: 'bad_request: invalid JSON body' } }, 400, cors); }
+
+  const model = env.ZHIPU_MODEL || 'glm-4.6v';
+  const zhipuBody = toZhipuBody(anthropicBody, model);
+
+  let upstream;
+  try {
+    upstream = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + env.ZHIPU_KEY },
+      body: JSON.stringify(zhipuBody),
+    });
+  } catch (e) {
+    return json({ error: { message: '连不上智谱 API：' + (e && e.message ? e.message : e) } }, 502, cors);
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => '');
+    let j = null; try { j = JSON.parse(text); } catch (e) {}
+    return json(j || { error: { message: 'upstream HTTP ' + upstream.status + ': ' + text.slice(0, 500) } }, upstream.status, cors);
+  }
+
+  const stream = zhipuStreamToAnthropic(upstream.body);
+  return new Response(stream, { status: 200, headers: Object.assign({}, cors, { 'content-type': 'text/event-stream' }) });
 }
