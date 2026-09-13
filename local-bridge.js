@@ -47,7 +47,8 @@ const getDSKey = () => { try { return localStorage.getItem(LS_DS_KEY) || ''; } c
 const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } catch (e) {} };
 const getZPKey = () => { try { return localStorage.getItem(LS_ZP_KEY) || ''; } catch (e) { return ''; } };
 const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } catch (e) {} };
-const getModel = () => { try { return localStorage.getItem(LS_MODEL) || MODELS[0].id; } catch (e) { return MODELS[0].id; } };
+const DEFAULT_MODEL = 'glm-4.6v';
+const getModel = () => { try { return localStorage.getItem(LS_MODEL) || DEFAULT_MODEL; } catch (e) { return DEFAULT_MODEL; } };
 const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) {} };
 
 const LS_WS = 'mdd.local.workspace';
