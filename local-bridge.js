@@ -466,7 +466,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const m = getModel();
     if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
     if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
-    if (apiKeyField) apiKeyField.hidden = isShared(m); // 用分享链接进来的，不用填自己的 Key
+    // 分享链接进来的不用填自己的 Key；选了 DeepSeek/智谱时也不需要看到 Anthropic 的输入框
+    if (apiKeyField) apiKeyField.hidden = isShared(m) || isDeepSeek(m) || isZhipu(m);
   };
 
   const syncBtn = document.getElementById('syncBtn');
