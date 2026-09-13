@@ -1,14 +1,15 @@
 /* 前端密码锁 —— 用户明确要求的"公网 + 用户名密码"访问方式。
    如实说明局限：这只是挡随手访客的前端提示框，不是真正的账户系统——
    任何人查看页面源码都能看到下面这个哈希，只是看不到明文密码；
-   真正需要多用户、可审计的登录，需要一个后端。 */
+   真正需要多用户、可审计的登录，需要一个后端。
+   登录状态存在 sessionStorage：同一次浏览器会话内（刷新、切页面）不用重登，
+   但关掉标签页/窗口再重新访问，一律回到登录页——不做"记住此设备"。 */
 'use strict';
 
 (function () {
   const REALM = 'mdd-auth-v1';
   const CRED_HASH = '6fd1e4aebb6b1f1937d1ccf90432c394c4fc0dc3d555178041bb34ebf654835e'; // sha256("username:password")
-  const TOKEN_KEY = 'mdd.auth.token';
-  const TOKEN_TTL_DAYS = 30;
+  const TOKEN_KEY = 'mdd.auth.session';
 
   async function sha256Hex(str) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -16,20 +17,31 @@
   }
   function hasValidToken() {
     try {
-      const raw = localStorage.getItem(TOKEN_KEY);
+      const raw = sessionStorage.getItem(TOKEN_KEY);
       if (!raw) return false;
       const obj = JSON.parse(raw);
-      return obj.realm === REALM && (Date.now() - obj.at) < TOKEN_TTL_DAYS * 86400000;
+      return obj.realm === REALM;
     } catch (e) { return false; }
   }
   function grant() {
-    try { localStorage.setItem(TOKEN_KEY, JSON.stringify({ realm: REALM, at: Date.now() })); } catch (e) {}
+    try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ realm: REALM, at: Date.now() })); } catch (e) {}
     document.body.classList.add('mdd-unlocked');
     const gate = document.getElementById('authGate');
     if (gate) gate.remove();
   }
+  function logout() {
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    location.reload();
+  }
+  window.__mddLogout = logout;
+
+  function wireLogoutButton() {
+    const btn = document.getElementById('logoutBtn');
+    if (btn) btn.addEventListener('click', logout);
+  }
 
   function boot() {
+    wireLogoutButton();
     if (hasValidToken()) { document.body.classList.add('mdd-unlocked'); return; }
     const gate = document.getElementById('authGate');
     if (!gate) { document.body.classList.add('mdd-unlocked'); return; }

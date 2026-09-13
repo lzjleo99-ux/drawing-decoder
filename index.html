@@ -374,10 +374,24 @@ body.mdd-unlocked #authGate{display:none}
 .authbox input:focus{border-color:var(--accent);outline:none}
 .autherr{font-size:12px;color:var(--crit);margin-top:10px}
 .authnote{font-size:11px;color:var(--ink3);margin-top:16px;line-height:1.55;border-top:1px dashed var(--line);padding-top:12px}
+.authlogos{display:flex;justify-content:center;align-items:center;gap:22px;padding:16px;margin-bottom:14px;
+  background:#12171a;border-radius:2px}
+.authlogos img{height:52px;width:auto;display:block}
+.authscope{text-align:center;font-family:var(--f-mono);font-size:10px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--warn);border:1px solid var(--warn);background:var(--warn-wash);
+  padding:5px 8px;border-radius:2px;margin-bottom:16px}
+.authcredit{margin-top:12px;font-size:11px;text-align:center;line-height:1.5}
+.authcredit a{color:var(--ink3)}
+.authcredit a:hover{color:var(--accent)}
 </style>
 
 <div id="authGate">
   <div class="authbox">
+    <div class="authlogos">
+      <img src="assets/ftn-logo-small.png" alt="Faculty of Technical Sciences, Novi Sad">
+      <img src="assets/uns-logo-small.png" alt="University of Novi Sad">
+    </div>
+    <p class="authscope" data-i18n="auth.scope"></p>
     <h2 data-i18n="auth.title"></h2>
     <p class="sub" data-i18n="auth.sub"></p>
     <div class="fld"><label for="authUser" data-i18n="auth.user"></label>
@@ -387,6 +401,7 @@ body.mdd-unlocked #authGate{display:none}
     <button class="btn full" id="authBtn" type="button" data-i18n="auth.enter"></button>
     <p class="autherr" id="authErr" hidden data-i18n="auth.wrong"></p>
     <p class="authnote" data-i18n="auth.note"></p>
+    <p class="authcredit"><a href="https://www.uns.ac.rs/index.php/en/faculties/ffaculties/faculty-technical-sciences" target="_blank" rel="noopener" data-i18n="intro.credit"></a></p>
   </div>
 </div>
 
@@ -408,6 +423,7 @@ body.mdd-unlocked #authGate{display:none}
   <div class="top-actions">
     <select class="langsel" id="langSel" aria-label="Language"></select>
     <span class="cap" id="capState"><i></i><span data-i18n="cap.connecting"></span></span>
+    <button class="btn ghost sm" id="logoutBtn" type="button" data-i18n="auth.logout"></button>
   </div>
 </header>
 
