@@ -2948,13 +2948,18 @@ function saveHistory() {
   } catch (e) { /* 存储不可用时忽略 */ }
   renderHistory();
 }
-function renderHistory() {
-  const list = loadHist(), ul = $('#hist');
-  if (!list.length) { ul.innerHTML = '<li class="empty">' + esc(t('hist.empty')) + '</li>'; return; }
-  ul.innerHTML = list.map(h => '<li><button type="button" data-id="' + esc(h.id) + '">' +
+function historyListHTML(list) {
+  if (!list.length) return '<li class="empty">' + esc(t('hist.empty')) + '</li>';
+  return list.map(h => '<li><button type="button" data-id="' + esc(h.id) + '">' +
     '<span class="ht">' + esc(h.title) + '</span>' +
     '<span class="hd">' + esc(TX(h.kind === 'code' ? '代码' : h.kind === 'chart' ? '图表' : '图纸')) +
     ' · ' + esc(TX(h.mode === 'teach' ? '教学' : '工程')) + ' · ' + esc(h.at) + '</span></button></li>').join('');
+}
+// 侧栏历史面板和右上角的历史下拉共用同一份 localStorage 数据，两处一起刷新
+function renderHistory() {
+  const list = loadHist();
+  const ul = $('#hist'); if (ul) ul.innerHTML = historyListHTML(list);
+  const menu = $('#histMenuList'); if (menu) menu.innerHTML = historyListHTML(list);
 }
 function openHistory(id) {
   const h = loadHist().find(x => x.id === id); if (!h) return;
@@ -3052,6 +3057,33 @@ function bindUI() {
     const b = e.target.closest('button[data-id]'); if (b) openHistory(b.dataset.id);
   });
   $('#clearHist').addEventListener('click', () => {
+    try { localStorage.removeItem(HK); } catch (e) {}
+    renderHistory(); toast(t('toast.historyCleared'));
+  });
+
+  const historyBtn = $('#historyBtn'), historyMenu = $('#historyMenu');
+  if (historyBtn && historyMenu) {
+    historyBtn.addEventListener('click', () => {
+      const opening = historyMenu.hidden;
+      historyMenu.hidden = !opening;
+      if (opening) renderHistory();
+    });
+    document.addEventListener('click', (e) => {
+      if (!historyMenu.hidden && !e.target.closest('.historyWrap')) historyMenu.hidden = true;
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') historyMenu.hidden = true; });
+  }
+  $('#histMenuList').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-id]');
+    if (b) { openHistory(b.dataset.id); if (historyMenu) historyMenu.hidden = true; }
+  });
+  const historyBackBtn = $('#historyBackBtn');
+  if (historyBackBtn) historyBackBtn.addEventListener('click', () => {
+    showExample(); $('#reportState').textContent = t('report.state.demo');
+    if (historyMenu) historyMenu.hidden = true;
+  });
+  const historyClearBtn = $('#historyClearBtn');
+  if (historyClearBtn) historyClearBtn.addEventListener('click', () => {
     try { localStorage.removeItem(HK); } catch (e) {}
     renderHistory(); toast(t('toast.historyCleared'));
   });
