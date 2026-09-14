@@ -735,8 +735,8 @@ async function prepareImages() {
 /* ============ 提示词 ============ */
 const OUTPUT_LANG = {
   zh: '全部用简体中文；牌号、标准号、指令、符号（如 Ø、⌀、⊥、Ra、H7/k6）保留原文写法。',
-  en: 'Write everything in English; keep material grades, standard numbers, G-code/PLC instructions and symbols (e.g. Ø, ⌀, ⊥, Ra, H7/k6) in their original form.',
-  sr: 'Sve piši na srpskom jeziku (latinica); oznake materijala, brojeve standarda, instrukcije i simbole (npr. Ø, ⌀, ⊥, Ra, H7/k6) zadrži u izvornom obliku.',
+  en: 'Write everything in English — every single string value, including short table cells, sample/series/legend labels, line-style names and one- or two-word field values, not just the longer prose fields. Keep material grades, standard numbers, G-code/PLC instructions and symbols (e.g. Ø, ⌀, ⊥, Ra, H7/k6) in their original form.',
+  sr: 'Sve piši na srpskom jeziku (latinica) — svaka string vrednost, uključujući kratke ćelije tabela, oznake uzoraka/serija/legende, nazive stilova linija i jedno- ili dvočlane vrednosti polja, ne samo duže opisne delove. Oznake materijala, brojeve standarda, instrukcije i simbole (npr. Ø, ⌀, ⊥, Ra, H7/k6) zadrži u izvornom obliku.',
 };
 function RULES() {
   const lang = (typeof getLang === 'function') ? getLang() : 'zh';
@@ -1348,7 +1348,7 @@ async function runVisual() {
     catch (e) { if (e && e.code === 'cancelled') throw e; toast(t(S.mode === 'teach' ? 'toast.modeFail.teach' : 'toast.modeFail.eng') + errMsg(e), 5000); }
 
     next();
-    finishReport(cls, d, mat, { extra: extra, ocr: ocrRaw, planText: prep.planText, cls: clsNote });
+    await finishReport(cls, d, mat, { extra: extra, ocr: ocrRaw, planText: prep.planText, cls: clsNote });
     S.report.imgs = imgs.slice(0, 1);
   } catch (e) {
     if (e && e.code === 'images_unavailable') return await runNoImageFallback();
@@ -1374,7 +1374,7 @@ async function runNoImageFallback() {
   let extra = null;
   try { extra = await askJSON(extraPrompt(S.mode, cls, d, ''), { onText, modelTier: S.tier }); } catch (e) { if (e && e.code === 'cancelled') throw e; }
   setStep(2);
-  finishReport(cls, d, null, { extra: extra, planText: t('plan.textOnly') });
+  await finishReport(cls, d, null, { extra: extra, planText: t('plan.textOnly') });
 }
 
 function splitByBytes(text, budget, maxParts) {
@@ -1424,7 +1424,7 @@ async function runCodeCore(full, label) {
   catch (e) { if (e && e.code === 'cancelled') throw e; toast(t(S.mode === 'teach' ? 'toast.modeFail.teach' : 'toast.modeFail.eng') + errMsg(e), 5000); }
 
   next();
-  finishReport('code', d, null, { extra: extra, planText: label ? t('plan.codeSource') + label : '' });
+  await finishReport('code', d, null, { extra: extra, planText: label ? t('plan.codeSource') + label : '' });
 }
 
 async function runDocumentText(full) {
@@ -1468,7 +1468,7 @@ async function runDocumentText(full) {
   catch (e) { if (e && e.code === 'cancelled') throw e; toast(t(S.mode === 'teach' ? 'toast.modeFail.teach' : 'toast.modeFail.eng') + errMsg(e), 5000); }
 
   next();
-  finishReport('drawing', d, mat, { extra: extra, planText: t('plan.textOnly') });
+  await finishReport('drawing', d, mat, { extra: extra, planText: t('plan.textOnly') });
 }
 
 function sliceBytes(s, max) {
@@ -1555,11 +1555,41 @@ function showPlan(text) {
   box.hidden = false; box.textContent = text;
 }
 
-function finishReport(kind, data, mat, extras) {
+// 即使提示词里已经要求"全部用 X 语言"，生成大段结构化 JSON（尤其是表格里一堆相似的行）
+// 时模型偶尔还是会漏翻几处，留下夹杂的中文。这里做一次兜底检查：选的不是中文，就扫一遍
+// 结果里还有没有残留的中文字符，有的话再喊模型专门翻一次——最多两次，翻不干净也不会死循环。
+const CJK_RE = /[一-鿿㐀-䶿豈-﫿]/;
+function deepHasCJK(v) {
+  if (v == null) return false;
+  if (typeof v === 'string') return CJK_RE.test(v);
+  if (Array.isArray(v)) return v.some(deepHasCJK);
+  if (typeof v === 'object') return Object.values(v).some(deepHasCJK);
+  return false;
+}
+const LANG_FIX_MAX_ATTEMPTS = 2;
+async function ensureLanguageCompliance(obj, lang, signal) {
+  if (!obj || lang === 'zh' || !deepHasCJK(obj)) return obj;
+  const targetName = TRANSLATE_LANG_NAME[lang] || lang;
+  let out = obj;
+  for (let i = 0; i < LANG_FIX_MAX_ATTEMPTS; i++) {
+    try { out = await translateJSONBlob(out, targetName, signal); }
+    catch (e) { if (e && e.code === 'cancelled') throw e; break; }
+    if (!deepHasCJK(out)) break;
+  }
+  return out;
+}
+
+async function finishReport(kind, data, mat, extras) {
   const ex = extras || {};
+  const lang = getLang();
+  if (lang !== 'zh') {
+    try { data = await ensureLanguageCompliance(data, lang); } catch (e) { if (e && e.code === 'cancelled') throw e; }
+    if (mat) { try { mat = await ensureLanguageCompliance(mat, lang); } catch (e) { if (e && e.code === 'cancelled') throw e; } }
+    if (ex.extra) { try { ex.extra = await ensureLanguageCompliance(ex.extra, lang); } catch (e) { if (e && e.code === 'cancelled') throw e; } }
+  }
   S.report = {
     kind: kind, mode: S.mode, data: data, mat: mat, extra: ex.extra || null, ocr: ex.ocr || null,
-    planText: ex.planText || '', clsNote: ex.cls || null, qa: [], at: nowStamp(), lang: getLang(),
+    planText: ex.planText || '', clsNote: ex.cls || null, qa: [], at: nowStamp(), lang: lang,
     src: { name: S.src.name, size: S.src.size, note: S.src.note || '', kind: S.src.kind },
   };
   S.demo = false;
@@ -1617,7 +1647,7 @@ async function translateReportContent(targetLang) {
     const bytes = bytesOf(JSON.stringify(val));
     if (bytes > budget) { skipCount++; continue; }
     try {
-      r[key] = await translateJSONBlob(val, targetName, controller.signal);
+      r[key] = await ensureLanguageCompliance(val, targetLang, controller.signal);
       okCount++;
     } catch (e) {
       if (e && e.code === 'cancelled') break;
