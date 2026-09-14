@@ -274,6 +274,10 @@ ol.flow li::before{content:counter(f);position:absolute;left:0;top:1px;font-fami
 .qa-a{font-size:13.5px;color:var(--ink2);margin-top:6px;padding-left:28px;white-space:pre-wrap}
 
 /* ask panel */
+.askBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:11.5px;color:var(--ink3)}
+.askBar label{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.askBar select{font-size:12px;padding:4px 7px;border:1px solid var(--line);border-radius:2px;background:var(--sheet);color:var(--ink)}
+.askNote{font-size:11px;color:var(--ink3)}
 .ask{display:flex;gap:9px;align-items:flex-end}
 .ask textarea{flex:1;min-height:42px;max-height:150px;resize:vertical;font-family:inherit;font-size:13.5px;
   padding:9px 11px;border:1px solid var(--line);border-radius:2px;background:var(--sheet2);color:var(--ink)}
@@ -581,6 +585,11 @@ body.mdd-admin #adminBtn{display:inline-flex}
       <div class="panel-h"><h2 data-i18n="panel.ask.title"></h2></div>
       <div class="panel-b">
         <div class="presets" id="presets"></div>
+        <div class="askBar" id="askBar" hidden>
+          <label for="askModelSel" data-i18n="ask.modelLabel"></label>
+          <select id="askModelSel" aria-label="Ask model"></select>
+          <span class="askNote" id="askNote" data-i18n="ask.webSearchNote"></span>
+        </div>
         <div class="ask">
           <textarea id="askInput" data-i18n-ph="ask.placeholder" data-i18n-aria="ask.aria" placeholder="" aria-label=""></textarea>
           <button class="btn" id="askBtn" data-i18n="btn.ask"></button>

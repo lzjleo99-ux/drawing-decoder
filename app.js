@@ -61,6 +61,7 @@ const S = {
 async function boot() {
   bindUI();
   initLangSwitch();
+  setupAskModelSelector();
   applyI18n();
   renderHistory();
   showExample();
@@ -106,6 +107,7 @@ function initLangSwitch() {
     if (typeof window.__refreshBridgeI18n === 'function') window.__refreshBridgeI18n();
     renderHistory();
     renderPresets();
+    refreshAskModelOptions();
     if (S.report) {
       if (S.demo) showExample();
       else if (S.report.lang !== target) await translateReportContent(target);
@@ -113,6 +115,34 @@ function initLangSwitch() {
     }
     syncRun();
   });
+}
+
+/* 追问框的模型选择：只有本地直连版（local-bridge.js）才有多家 API 可选，
+   纯 Artifact 沙箱里没有 Apex/DeepSeek 概念，这个下拉框就不出现，追问照旧用宿主的 S.sample。 */
+const LS_ASK_MODEL = 'mdd.askmodel';
+const ASK_MODELS = [
+  { id: 'claude', label: 'ask.model.claude', overrideModel: 'claude-opus-5', webSearch: true, canImage: true },
+  { id: 'apex-deepseek', label: 'ask.model.apexDeepseek', overrideModel: 'TPK/DeepSeek-V4-Flash', webSearch: false, canImage: false },
+  { id: 'apex-glm', label: 'ask.model.apexGlm', overrideModel: 'TPK/GLM-5.2', webSearch: false, canImage: false },
+];
+function getAskModel() {
+  try { return ASK_MODELS.find(m => m.id === localStorage.getItem(LS_ASK_MODEL)) || ASK_MODELS[0]; }
+  catch (e) { return ASK_MODELS[0]; }
+}
+function refreshAskModelOptions() {
+  const sel = $('#askModelSel'); if (!sel) return;
+  const cur = sel.value || getAskModel().id;
+  sel.innerHTML = ASK_MODELS.map(m => '<option value="' + m.id + '">' + esc(t(m.label)) + '</option>').join('');
+  sel.value = cur;
+}
+function setupAskModelSelector() {
+  if (typeof window.__MDD_LOCAL_BRIDGE__ === 'undefined') return; // Artifact 沙箱：不显示
+  const bar = $('#askBar'), sel = $('#askModelSel');
+  if (!bar || !sel) return;
+  bar.hidden = false;
+  refreshAskModelOptions();
+  sel.value = getAskModel().id;
+  sel.addEventListener('change', () => { try { localStorage.setItem(LS_ASK_MODEL, sel.value); } catch (e) {} });
 }
 
 function syncRun() {
@@ -857,12 +887,29 @@ const CHART_SCHEMA = `{
 "quality":[{"issue":"图表本身的问题(缺单位、坐标轴截断、样本量不明、无误差棒等)","impact":"会导致什么误读"}],
 "risks":[{"level":"高|中|低","item":"使用这张图时的风险","why":"原因","suggestion":"建议"}],
 "uncertainties":["读数误差、看不清的刻度、需要原始数据核对的点"],
-"glossary":[{"term":"术语或符号","meaning":"含义"}]
+"glossary":[{"term":"术语或符号","meaning":"含义"}],
+"mechanicalTest":{"testType":"拉伸试验|弯曲试验|冲击试验|断裂韧性试验|疲劳试验|硬度试验|非力学性能试验/其他",
+ "standard":"依据的试验标准号(如 GB/T 228.1、ASTM E8、ISO 6892；GB/T 232；GB/T 229、ASTM E23；GB/T 4161、ASTM E399；GB/T 3075、ASTM E466)，看不出来则写\"未标注\"",
+ "specimen":"试样类型、尺寸、缺口/预制裂纹形式，看不出来则写\"未标注\"",
+ "keyResults":[{"parameter":"按试验类型对应的关键参数(见下方逐类型清单)","value":"数值","unit":"单位","how":"从图上怎么得到的(读数/切线法/公式换算等)"}],
+ "curveShapeMeaning":"曲线形状对应的物理过程(如颈缩前后行为、韧脆转变区、裂纹扩展稳定/失稳阶段、高周与低周疲劳区别)"},
+"nextExperiments":[{"why":"现有数据有什么局限或疑点，促使需要做下一步试验","what":"具体建议做什么试验、在什么条件下(温度/应变率/取样部位/重复次数等)","expectedInsight":"预期能补充回答什么问题或验证什么假设"}],
+"reportWritingTips":["针对这类试验数据，写正式试验报告时的具体建议：应包含哪些章节和图表、这批数据最容易被审阅者质疑的地方、如何标注误差与置信区间、常见的表述疏漏"]
 }`;
+
+const MECH_TEST_GUIDE = [
+  '如果图表属于下列几类力学性能试验曲线，先判定具体是哪一类（写入 mechanicalTest.testType），再按对应清单提取 keyResults，缺的写"未标注"、不要编造：',
+  '- 拉伸试验（应力-应变曲线）：弹性模量 E、屈服强度(ReL/Rp0.2)、抗拉强度 Rm、断后伸长率 A、断面收缩率 Z、屈强比；注意区分工程应力-应变与真实应力-应变，颈缩点的位置。',
+  '- 弯曲试验（载荷-挠度曲线）：抗弯强度/弯曲强度 σbb、弯曲弹性模量、最大挠度、是否出现裂纹或断裂及对应载荷、跨距与加载方式(三点/四点弯曲)。',
+  '- 冲击试验（通常是表格或棒状图，而非连续曲线）：冲击吸收能量(KV2/KU2/AKV)、缺口类型(V型/U型)、试验温度、若有多个温度点则判断韧脆转变温度区间。',
+  '- 断裂韧性试验（载荷-位移或 J 积分-裂纹扩展曲线）：断裂韧性 KIC 或 JIC、试样类型(紧凑拉伸 CT/三点弯曲 SENB)、预制裂纹长度、失稳点或条件性 PQ 的确定方法。',
+  '- 疲劳试验（S-N 曲线/ε-N 曲线）：疲劳极限或条件疲劳极限(对应循环次数，如 10^7)、应力比 R、各数据点的应力幅与对应寿命、曲线是否分高周/低周两段、是否有未破坏(runout)数据点并单独标注。',
+  '这些参数即使图上没有直接标注数值，只要能从曲线特征估读或换算，也要尽量填 derivedQuantities 和 mechanicalTest.keyResults，并在 how 里写清楚估读/换算方法；确实无法判断的，明确写"未标注"而不是留空不填。',
+].join('\n');
 
 function chartPrompt(imgNote, vector, ocr) {
   return [
-    '你是工程数据分析与试验报告专家，熟悉材料试验曲线、机械性能曲线、疲劳与可靠性数据的读法。',
+    '你是工程数据分析与试验报告专家，熟悉材料试验曲线、机械性能曲线、疲劳与可靠性数据的读法，尤其擅长拉伸、弯曲、冲击、断裂韧性、疲劳这几类力学性能试验数据的解读与报告撰写指导。',
     '',
     '我给你的图片：' + imgNote,
     '它们是同一张工程图表：第 1 张是全貌，其余是高分辨率局部块，用于看清坐标刻度、图例和数据点标注。',
@@ -871,6 +918,12 @@ function chartPrompt(imgNote, vector, ocr) {
     '',
     '任务：读懂这张图表——两个轴各是什么量、有几条曲线分别代表什么工况、曲线形状说明了什么物理过程、关键点的数值是多少、工程上应该怎么用它。',
     'readings 与 dataTable 里的数值必须按坐标刻度实际读出并注明是估读；读不准就写区间，不要给假精度。',
+    '',
+    MECH_TEST_GUIDE,
+    '',
+    '如果是上述力学性能试验之一，额外给出 nextExperiments（基于这批数据的局限性，建议下一步该做什么试验）和',
+    'reportWritingTips（这类数据写正式试验报告时的具体建议，不是泛泛的写作技巧，要结合这批数据本身的特点）。',
+    '如果明显不属于力学性能试验图表，mechanicalTest 整个对象填 null，nextExperiments 和 reportWritingTips 给空数组。',
     '',
     RULES(),
     '',
@@ -1853,6 +1906,13 @@ function chartSections(d, mat) {
   out.push(['趋势与拐点', 'Trends', bullets(d.trends) +
     (arr(d.inflections).length ? sub('拐点与转折') + tbl([{ h: '位置' }, { h: '发生了什么' }, { h: '物理机理' }],
       arr(d.inflections).map(x => [x.where, x.what, x.why])) : '')]);
+  if (d.mechanicalTest && has(d.mechanicalTest.testType) && !/其他|非力学/.test(d.mechanicalTest.testType)) {
+    const mt = d.mechanicalTest;
+    out.push(['力学性能试验详情', 'Mechanical Test',
+      kvTbl(['项目', '内容'], [['依据标准', mt.standard], ['试样描述', mt.specimen], ['曲线形状的工程含义', mt.curveShapeMeaning]]) +
+      (arr(mt.keyResults).length ? sub('关键参数') + tbl([{ h: '参数' }, { h: '数值', num: true }, { h: '单位', num: true }, { h: '怎么得到的' }],
+        arr(mt.keyResults).map(x => [x.parameter, x.value, x.unit, x.how])) : '')]);
+  }
   out.push(['工程含义与用法', 'Interpretation', paras(d.engineeringMeaning) +
     (arr(d.howToUse).length ? sub('工程上怎么用这张图') + bullets(d.howToUse) : '')]);
   out.push(['材料与性能', 'Materials', mat ? matSection(mat) : (arr(d.materialsSeen).length ? chips(d.materialsSeen) : '')]);
@@ -1860,6 +1920,12 @@ function chartSections(d, mat) {
     (arr(d.quality).length ? tbl([{ h: '问题' }, { h: '会导致什么误读' }], arr(d.quality).map(x => [x.issue, x.impact])) : '') +
     (arr(d.risks).length ? sub('使用风险') + riskList(d.risks) : '') +
     (arr(d.uncertainties).length ? sub('需要人工复核') + bullets(d.uncertainties) : '')]);
+  if (arr(d.nextExperiments).length || arr(d.reportWritingTips).length) {
+    out.push(['下一步试验与报告撰写建议', 'Next Steps',
+      (arr(d.nextExperiments).length ? sub('下一步试验计划') + tbl([{ h: '为什么建议' }, { h: '具体建议' }, { h: '预期能回答什么' }],
+        arr(d.nextExperiments).map(x => [x.why, x.what, x.expectedInsight])) : '') +
+      (arr(d.reportWritingTips).length ? sub('试验报告撰写建议') + bullets(d.reportWritingTips) : '')]);
+  }
   out.push(['术语与符号', 'Glossary', glossary(d.glossary)]);
   return out;
 }
@@ -2904,27 +2970,33 @@ async function ask(q) {
   const btn = $('#askBtn'); btn.disabled = true; btn.textContent = t('ask.thinking');
   S.abort = new AbortController();
   try {
+    // 只有本地直连版才有多家 API 可选；纯 Artifact 沙箱里没有这个下拉框，走宿主默认模型
+    const askModel = (typeof window.__MDD_LOCAL_BRIDGE__ !== 'undefined') ? getAskModel() : null;
+    const canImage = !askModel || askModel.canImage;
+    const hasImage = canImage && S.report.imgs && S.report.imgs.length && S.limits && S.limits.images;
     const ctxJSON = JSON.stringify({ kind: S.report.kind, analysis: S.report.data, materials: S.report.mat });
     const prompt = [
       '你是资深机械工程师。下面是一份' + (S.report.kind === 'code' ? '设备程序' : '机械图纸') + '的结构化分析结果（JSON）：',
       '"""', sliceBytes(ctxJSON, 42000), '"""',
-      S.report.imgs && S.report.imgs.length ? '同时附上了原图，可直接查看图面细节。' : '',
+      hasImage ? '同时附上了原图，可直接查看图面细节。' : '',
       '',
       '用户的问题：' + q,
       '',
       '要求：' + (OUTPUT_LANG[getLang()] || OUTPUT_LANG.zh) + ' 直接回答，像资深工程师给同事讲解一样具体；结论先行，必要时分点。',
       '只依据上述分析结果与图片作答；资料里没有依据的，明确说明"图上没有体现，需要补充确认"，不要编造数值。',
+      askModel && askModel.webSearch ? '如果问题涉及最新资讯、标准版本或需要查证外部资料，可以使用联网搜索工具确认后再回答。' : '',
       '控制在 400 字以内，不要 markdown 标题和代码块。',
     ].filter(Boolean).join('\n');
-    const opts = { modelTier: S.tier === 'quick' ? 'quick' : 'default', signal: S.abort.signal };
-    if (S.report.imgs && S.report.imgs.length && S.limits && S.limits.images) opts.images = S.report.imgs.slice(0, 1);
+    const opts = { modelTier: 'complex', signal: S.abort.signal }; // 追问按最高强度跑
+    if (hasImage) opts.images = S.report.imgs.slice(0, 1);
+    if (askModel) { opts.overrideModel = askModel.overrideModel; opts.webSearch = !!askModel.webSearch; }
     const r = await S.sample(prompt, opts);
     S.report.qa.push({ q, a: (r && r.text ? r.text : '').trim() });
     renderReport(); saveHistory();
     $('#askInput').value = '';
     const items = $$('.qa-item'); if (items.length) items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
   } catch (e) {
-    toast(errMsg(e), 5000);
+    toast((e && e.code === 'no_Apex_key') ? t('ask.needApexKey') : errMsg(e), 5000);
   } finally {
     btn.textContent = t('btn.ask'); S.busy = false; S.abort = null; syncRun();
   }

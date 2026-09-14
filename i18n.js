@@ -53,6 +53,12 @@ const UI = {
   "ask.placeholder": { zh: "例如：这个配合为什么选 k6？换成 6061-T6 铝合金需要改哪些地方？", en: "e.g. Why was k6 chosen for this fit? What changes if we switch to 6061-T6 aluminum?", sr: "npr. Zašto je izabrano k6 naleganje? Šta treba promeniti za prelazak na aluminijum 6061-T6?" },
   "ask.aria": { zh: "追问内容", en: "Follow-up question", sr: "Dodatno pitanje" },
   "btn.ask": { zh: "提问", en: "Ask", sr: "Pitaj" },
+  "ask.modelLabel": { zh: "回答用的模型", en: "Answer with", sr: "Odgovara model" },
+  "ask.model.claude": { zh: "Claude（可联网搜索）", en: "Claude (can search the web)", sr: "Claude (može da pretražuje veb)" },
+  "ask.model.apexDeepseek": { zh: "DeepSeek-V4-Flash", en: "DeepSeek-V4-Flash", sr: "DeepSeek-V4-Flash" },
+  "ask.model.apexGlm": { zh: "GLM-5.2", en: "GLM-5.2", sr: "GLM-5.2" },
+  "ask.webSearchNote": { zh: "已按最高强度运行；选 Claude 时会视需要自动联网查资料", en: "Runs at maximum effort; Claude will search the web automatically when useful", sr: "Radi maksimalnim intenzitetom; Claude po potrebi automatski pretražuje veb" },
+  "ask.needApexKey": { zh: "还没有填 Apex API Key，请在页面顶部输入后再试，或把回答模型换成 Claude。", en: "No Apex API key entered yet — enter one at the top of the page, or switch the answer model to Claude.", sr: "Apex API ključ još nije unet — unesi ga na vrhu stranice ili prebaci model odgovora na Claude." },
   "intro.text": { zh: "机械图纸解译台：把机械工程图纸、数据图表或老设备的控制程序拖进来，AI 会逐条读懂结构、公差、工作原理与材料性能，教学或工程两种视角都可以生成，并能导出可直接归档的分析报告。", en: "Drawing Decoder reads mechanical drawings, engineering charts and legacy machine-control code — it explains structure, tolerances, working principles and material properties in a teaching or engineering view, and exports an archive-ready PDF report.", sr: "Drawing Decoder analizira mašinske crteže, inženjerske grafikone i programe starih upravljačkih sistema — objašnjava strukturu, tolerancije, princip rada i svojstva materijala u nastavnom ili inženjerskom režimu, i izvozi izveštaj spreman za arhivu u PDF formatu." },
   "intro.credit": { zh: "诺维萨德大学技术科学学院 · Dr. Marko Vilotić 团队出品", en: "Faculty of Technical Sciences, University of Novi Sad · produced by Dr. Marko Vilotić\u2019s team", sr: "Fakultet tehni\u010dkih nauka, Univerzitet u Novom Sadu \u00b7 autorski tim dr Marka Viloti\u0107a" },
   "auth.title": { zh: "访问受限", en: "Restricted Access", sr: "Ograničen pristup" },
@@ -518,7 +524,19 @@ const TX_MAP = {
   "工程": ["Engineering", "Inženjering"],
   "设备程序": ["Device Program", "Program uređaja"],
   "工程图表": ["Engineering Chart", "Inženjerski grafikon"],
-  "机械图纸": ["Mechanical Drawing", "Mašinski crtež"]
+  "机械图纸": ["Mechanical Drawing", "Mašinski crtež"],
+  "力学性能试验详情": ["Mechanical Test Details", "Detalji mehaničkog ispitivanja"],
+  "下一步试验与报告撰写建议": ["Next Steps & Report Writing", "Sledeći koraci i pisanje izveštaja"],
+  "试样描述": ["Specimen", "Epruveta"],
+  "曲线形状的工程含义": ["What the Curve Shape Means", "Značenje oblika krive"],
+  "关键参数": ["Key Parameters", "Ključni parametri"],
+  "怎么得到的": ["How Obtained", "Kako je dobijeno"],
+  "下一步试验计划": ["Next Experiment Plan", "Plan sledećeg ispitivanja"],
+  "试验报告撰写建议": ["Report Writing Tips", "Saveti za pisanje izveštaja"],
+  "为什么建议": ["Why", "Zašto"],
+  "具体建议": ["What to Do", "Šta uraditi"],
+  "预期能回答什么": ["Expected Insight", "Očekivani uvid"],
+  "识别为": ["Identified As", "Prepoznato kao"]
 };
 
 function getLang() {

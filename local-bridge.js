@@ -55,7 +55,9 @@ const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } cat
 const getZPKey = () => { try { return localStorage.getItem(LS_ZP_KEY) || ''; } catch (e) { return ''; } };
 const getApexKey = () => { try { return localStorage.getItem(LS_APEX_KEY) || ''; } catch (e) { return ''; } };
 const setApexKey = (v) => { try { localStorage.setItem(LS_APEX_KEY, v.trim()); } catch (e) { } };
-const isApex = (id) => MODELS.some(m => m.id === id && m.vendor === 'apex');
+// 前缀匹配而不是查 MODELS 列表：这样追问框可以路由到没放进主下拉框的纯文本 Apex 模型
+// （比如 DeepSeek-V4-Flash、GLM-5.2，看图分析用不了，但追问这种纯文字场景可以用）
+const isApex = (id) => /^TPK\//.test(id);
 const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } catch (e) { } };
 const DEFAULT_MODEL = 'glm-4.6v';
 const getModel = () => { try { return localStorage.getItem(LS_MODEL) || DEFAULT_MODEL; } catch (e) { return DEFAULT_MODEL; } };
@@ -154,10 +156,11 @@ const PROFILES = [
   { thinking: false, effort: false, maxTokens: 8192, label: '最小参数' },
 ];
 
-function buildBody(model, msgs, tier, profile) {
+function buildBody(model, msgs, tier, profile, tools) {
   const b = { model: model, max_tokens: profile.maxTokens, stream: true, messages: msgs };
   if (profile.thinking && model.indexOf('haiku') < 0) b.thinking = { type: 'adaptive' };
   if (profile.effort && model.indexOf('haiku') < 0) b.output_config = { effort: EFFORT[tier] || 'high' };
+  if (tools && tools.length) b.tools = tools;
   return b;
 }
 
@@ -200,7 +203,8 @@ async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, 
   const msgs = await anthropicMessages(turns, imgs);
   let res = null, err = null;
   for (let i = getProfile(); i < PROFILES.length; i++) {
-    const body = buildBody(model, msgs, opts.modelTier, PROFILES[i]);
+    const tools = opts.webSearch ? [{ type: 'web_search_20260209', name: 'web_search' }] : opts.tools;
+    const body = buildBody(model, msgs, opts.modelTier, PROFILES[i], tools);
     let r;
     try {
       r = await fetch(url, { method: 'POST', signal: opts.signal, headers: buildHeaders(), body: JSON.stringify(body) });
@@ -392,7 +396,7 @@ async function callApex(model, turns, imgs, opts) {
 async function callAPI(input, options) {
   const opts = options || {};
   const turns = typeof input === 'string' ? [{ role: 'user', content: String(input) }] : input.slice();
-  const model = getModel();
+  const model = opts.overrideModel || getModel(); // 追问框可以指定一个跟主下拉框不一样的模型
   const imgs = normalizeImages(opts.images);
 
   if (isShared(model)) {
