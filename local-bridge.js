@@ -32,9 +32,9 @@ const MODELS = [
   // 智谱只列能读图的两个：GLM-4.5-Air 是纯文本模型，不支持图片，所以没有放进来
   { id: 'glm-4.6v', name: 'GLM-4.6V', noteKey: 'bridge.note.glm46v', vendor: 'zhipu' },
   { id: 'glm-4.6v-flash', name: 'GLM-4.6V-Flash', noteKey: 'bridge.note.glm46vflash', vendor: 'zhipu' },
-  // Apex（api.aixapex.com）要求的模型名就是这几个字符串本身（含 TPK/ 前缀、大小写），不能自己改写
-  { id: 'TPK/DeepSeek-V4-Flash', name: 'DeepSeek-V4-Flash (Apex)', noteKey: 'bridge.note.apexDeepSeek', vendor: 'apex' },
-  { id: 'TPK/GLM-5.2', name: 'GLM-5.2 (Apex)', noteKey: 'bridge.note.apexGlm', vendor: 'apex' },
+  // Apex（api.aixapex.com）要求的模型名就是这几个字符串本身（含 TPK/ 前缀、大小写），不能自己改写。
+  // 只列会读图的两个：DeepSeek-V4-Flash 和 GLM-5.2 查证是纯文本模型（各自的看图版本是另外
+  // 单独命名的 DeepSeek-V4-Flash-Vision-Exp / GLM-5V-Turbo，Apex 这里提供的不是那两个），发图会失败。
   { id: 'TPK/Qwen3.6-35B-A3B', name: 'Qwen3.6-35B-A3B (Apex)', noteKey: 'bridge.note.apexQwen36', vendor: 'apex' },
   { id: 'TPK/Qwen3.8-27B', name: 'Qwen3.8-27B (Apex)', noteKey: 'bridge.note.apexQwen', vendor: 'apex' },
   // 只有打开过别人给的分享链接、本机存了分享令牌时才会出现在下拉里

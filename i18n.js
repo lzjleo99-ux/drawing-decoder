@@ -201,8 +201,6 @@ const UI = {
   "bridge.note.dschat": { zh: "更便宜，图片会自动改走 Opus 5", en: "Cheaper; images go through Opus 5", sr: "Jeftiniji; slike idu preko Opus 5" },
   "bridge.note.dsreasoner": { zh: "推理更强，图片会自动改走 Opus 5", en: "Stronger reasoning; images go through Opus 5", sr: "Jače rezonovanje; slike idu preko Opus 5" },
   "bridge.note.dsflash": { zh: "支持图片，更快更省", en: "Reads images, faster and cheaper", sr: "Čita slike, brži i jeftiniji" },
-  "bridge.note.apexDeepSeek": { zh: "适合代码与复杂逻辑", en: "For code and complex reasoning", sr: "Za kod i složeno rezonovanje" },
-  "bridge.note.apexGlm": { zh: "适合中文公文、文案和长文档", en: "For Chinese writing and long documents", sr: "Za kinesko pisanje i duge dokumente" },
   "bridge.note.apexQwen36": { zh: "通义千问 3.6，MoE 架构，兼顾速度与能力", en: "Qwen 3.6, MoE architecture, balances speed and capability", sr: "Qwen 3.6, MoE arhitektura, balans brzine i sposobnosti" },
   "bridge.note.apexQwen": { zh: "支持图片、多步骤任务和科研分析", en: "For vision, multi-step tasks and research", sr: "Za slike, zadatke u više koraka i istraživanje" },
   "bridge.apexSaved": { zh: "Apex Key 已保存", en: "Apex key saved", sr: "Apex ključ je sačuvan" },
