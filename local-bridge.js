@@ -12,12 +12,14 @@ const SYNC_TARGET_URL = 'https://lzjleo99-ux.github.io/drawing-decoder/';
 const LS_KEY = 'mdd.local.apikey';
 const LS_DS_KEY = 'mdd.local.dskey';
 const LS_ZP_KEY = 'mdd.local.zpkey';
+const LS_APEX_KEY = 'mdd.local.apexkey';
 const LS_MODEL = 'mdd.local.model';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 // 智谱走国内这个域名：api.z.ai（国际站）的浏览器预检没有返回 CORS 头，直连会被浏览器拦下；
 // open.bigmodel.cn 实测预检正常，同一套 Key/模型可用。
 const ZHIPU_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const APEX_URL = 'https://api.aixapex.com/v1/chat/completions';
 const ANTHROPIC_FALLBACK_MODEL = 'claude-opus-5'; // DeepSeek 不支持图片，图片调用自动改走这个
 
 const MODELS = [
@@ -30,6 +32,11 @@ const MODELS = [
   // 智谱只列能读图的两个：GLM-4.5-Air 是纯文本模型，不支持图片，所以没有放进来
   { id: 'glm-4.6v', name: 'GLM-4.6V', noteKey: 'bridge.note.glm46v', vendor: 'zhipu' },
   { id: 'glm-4.6v-flash', name: 'GLM-4.6V-Flash', noteKey: 'bridge.note.glm46vflash', vendor: 'zhipu' },
+  // Apex（api.aixapex.com）要求的模型名就是这几个字符串本身（含 TPK/ 前缀、大小写），不能自己改写
+  { id: 'TPK/DeepSeek-V4-Flash', name: 'DeepSeek-V4-Flash (Apex)', noteKey: 'bridge.note.apexDeepSeek', vendor: 'apex' },
+  { id: 'TPK/GLM-5.2', name: 'GLM-5.2 (Apex)', noteKey: 'bridge.note.apexGlm', vendor: 'apex' },
+  { id: 'TPK/Qwen3.6-35B-A3B', name: 'Qwen3.6-35B-A3B (Apex)', noteKey: 'bridge.note.apexQwen36', vendor: 'apex' },
+  { id: 'TPK/Qwen3.8-27B', name: 'Qwen3.8-27B (Apex)', noteKey: 'bridge.note.apexQwen', vendor: 'apex' },
   // 只有打开过别人给的分享链接、本机存了分享令牌时才会出现在下拉里
   { id: 'claude-shared', name: 'Claude', noteKey: 'bridge.note.shared', vendor: 'shared', requiresShare: true },
 ];
@@ -37,34 +44,37 @@ const isShared = (id) => id === 'claude-shared';
 const bridgeT = (k) => (typeof t === 'function' ? t(k) : k);
 const EFFORT = { quick: 'low', default: 'high', complex: 'xhigh' };
 const isDeepSeek = (id) => /^deepseek-/.test(id);
-const isZhipu = (id) => /^glm-/.test(id);
+const isZhipu = (id) => MODELS.some(m => m.id === id && m.vendor === 'zhipu');
 const VISION_DEEPSEEK = ['deepseek-flash'];   // 其余 DeepSeek 模型（V3/R1）不认图片
 const visionCapable = (id) => !isDeepSeek(id) || VISION_DEEPSEEK.indexOf(id) >= 0; // 智谱这里只列了会读图的型号，全部为 true
 
 const getKey = () => { try { return localStorage.getItem(LS_KEY) || ''; } catch (e) { return ''; } };
-const setKey = (v) => { try { localStorage.setItem(LS_KEY, v); } catch (e) {} };
+const setKey = (v) => { try { localStorage.setItem(LS_KEY, v); } catch (e) { } };
 const getDSKey = () => { try { return localStorage.getItem(LS_DS_KEY) || ''; } catch (e) { return ''; } };
-const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } catch (e) {} };
+const setDSKey = (v) => { try { localStorage.setItem(LS_DS_KEY, v.trim()); } catch (e) { } };
 const getZPKey = () => { try { return localStorage.getItem(LS_ZP_KEY) || ''; } catch (e) { return ''; } };
-const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } catch (e) {} };
+const getApexKey = () => { try { return localStorage.getItem(LS_APEX_KEY) || ''; } catch (e) { return ''; } };
+const setApexKey = (v) => { try { localStorage.setItem(LS_APEX_KEY, v.trim()); } catch (e) { } };
+const isApex = (id) => MODELS.some(m => m.id === id && m.vendor === 'apex');
+const setZPKey = (v) => { try { localStorage.setItem(LS_ZP_KEY, v.trim()); } catch (e) { } };
 const DEFAULT_MODEL = 'glm-4.6v';
 const getModel = () => { try { return localStorage.getItem(LS_MODEL) || DEFAULT_MODEL; } catch (e) { return DEFAULT_MODEL; } };
-const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) {} };
+const setModel = (v) => { try { localStorage.setItem(LS_MODEL, v); } catch (e) { } };
 
 const LS_WS = 'mdd.local.workspace';
 const getWS = () => { try { return (localStorage.getItem(LS_WS) || '').trim(); } catch (e) { return ''; } };
-const setWS = (v) => { try { localStorage.setItem(LS_WS, v.trim()); } catch (e) {} };
+const setWS = (v) => { try { localStorage.setItem(LS_WS, v.trim()); } catch (e) { } };
 
 // 别人打开你的分享链接后，用这两项去走你的后端代理，而不是自己的 Key
 const LS_SHARE_TOKEN = 'mdd.local.sharetoken';
 const LS_SHARE_URL = 'mdd.local.shareurl';
 const LS_SHARE_LABEL = 'mdd.local.sharelabel';
 const getShareToken = () => { try { return (localStorage.getItem(LS_SHARE_TOKEN) || '').trim(); } catch (e) { return ''; } };
-const setShareToken = (v) => { try { localStorage.setItem(LS_SHARE_TOKEN, v.trim()); } catch (e) {} };
+const setShareToken = (v) => { try { localStorage.setItem(LS_SHARE_TOKEN, v.trim()); } catch (e) { } };
 const getShareWorkerUrl = () => { try { return (localStorage.getItem(LS_SHARE_URL) || '').trim(); } catch (e) { return ''; } };
-const setShareWorkerUrl = (v) => { try { localStorage.setItem(LS_SHARE_URL, v.trim()); } catch (e) {} };
+const setShareWorkerUrl = (v) => { try { localStorage.setItem(LS_SHARE_URL, v.trim()); } catch (e) { } };
 const getShareLabel = () => { try { return (localStorage.getItem(LS_SHARE_LABEL) || '').trim(); } catch (e) { return ''; } };
-const setShareLabel = (v) => { try { localStorage.setItem(LS_SHARE_LABEL, v.trim()); } catch (e) {} };
+const setShareLabel = (v) => { try { localStorage.setItem(LS_SHARE_LABEL, v.trim()); } catch (e) { } };
 const hasShareAccess = () => !!(getShareToken() && getShareWorkerUrl());
 
 // 从「同步到线上网站」按钮打开的链接里取回 Key/模型设置，写入本页面的 localStorage
@@ -80,6 +90,7 @@ let __shareImported = false;
       if (cfg.anthropicKey) setKey(cfg.anthropicKey);
       if (cfg.dsKey) setDSKey(cfg.dsKey);
       if (cfg.zpKey) setZPKey(cfg.zpKey);
+      if (cfg.apexKey) setApexKey(cfg.apexKey);
       if (cfg.wsId) setWS(cfg.wsId);
       if (cfg.model) setModel(cfg.model);
       __syncImported = true;
@@ -97,12 +108,12 @@ let __shareImported = false;
   }
   // 清掉地址栏里的敏感参数，不留在浏览历史 / 地址栏截图里
   if (mSync || mShare) {
-    try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&](sync|share)=[^&]+/, '')); } catch (e) {}
+    try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&](sync|share)=[^&]+/, '')); } catch (e) { }
   }
 })();
 const LS_PROFILE = 'mdd.local.profile';
 const getProfile = () => { try { return parseInt(localStorage.getItem(LS_PROFILE), 10) || 0; } catch (e) { return 0; } };
-const setProfile = (i) => { try { localStorage.setItem(LS_PROFILE, String(i)); } catch (e) {} };
+const setProfile = (i) => { try { localStorage.setItem(LS_PROFILE, String(i)); } catch (e) { } };
 let lastError = '';
 
 function blobToB64(blob) {
@@ -124,8 +135,10 @@ function mapError(vendor, status, body) {
   if (status === 429) return { code: 'rate_limited', message: '[' + vendor + '] 速率限制或额度不足 → ' + m, status: status, raw: m };
   if (status >= 500) return { code: 'api_error', message: '[' + vendor + '] 服务端错误 → ' + m, status: status, raw: m };
   if (vendor === 'anthropic' && /anthropic-workspace-id|scoped to a workspace/i.test(m)) {
-    return { code: 'api_error', status: status, raw: m,
-      message: '这个 API Key 是组织级的，必须指定工作区：在顶部「Workspace ID」里填入 wrkspc_ 开头的 ID（platform.claude.com/settings/workspaces，点进某个工作区后地址栏里就是），或改用某个工作区专属的 Key。' };
+    return {
+      code: 'api_error', status: status, raw: m,
+      message: '这个 API Key 是组织级的，必须指定工作区：在顶部「Workspace ID」里填入 wrkspc_ 开头的 ID（platform.claude.com/settings/workspaces，点进某个工作区后地址栏里就是），或改用某个工作区专属的 Key。'
+    };
   }
   if (/image/i.test(m)) return { code: 'image_rejected', message: '[' + vendor + '] 图片被拒绝 → ' + m, status: status, raw: m };
   return { code: 'api_error', message: '[' + vendor + '] ' + m + (t ? '（' + t + '）' : ''), status: status, raw: m };
@@ -196,7 +209,7 @@ async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, 
       throw { code: 'api_error', message: '连不上 ' + new URL(url).host + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
     }
     if (r.ok) { res = r; if (i !== getProfile()) { setProfile(i); console.info('[bridge] 采用参数档位：' + PROFILES[i].label); } break; }
-    let j = null; try { j = await r.json(); } catch (e) {}
+    let j = null; try { j = await r.json(); } catch (e) { }
     err = mapError(vendor, r.status, j);
     if (/credit balance|billing|Plans & Billing|authentication|api key|not permitted|does not have access|invalid or expired share token/i.test(err.raw || '')) throw err;
     if (r.status !== 400 || i === PROFILES.length - 1) throw err;
@@ -206,7 +219,7 @@ async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, 
 
   const reader = res.body.getReader(), dec = new TextDecoder();
   let buf = '', text = '', truncated = false;
-  for (;;) {
+  for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -220,7 +233,7 @@ async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, 
         let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
         if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
           text += ev.delta.text;
-          if (opts.onText) { try { opts.onText({ text: text, delta: ev.delta.text }); } catch (e) {} }
+          if (opts.onText) { try { opts.onText({ text: text, delta: ev.delta.text }); } catch (e) { } }
         } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason === 'max_tokens') {
           truncated = true;
         } else if (ev.type === 'error') {
@@ -277,13 +290,13 @@ async function callDeepSeek(model, turns, imgs, opts) {
     throw { code: 'api_error', message: '连不上 api.deepseek.com（网络或代理问题）：' + (e && e.message ? e.message : e) };
   }
   if (!r.ok) {
-    let j = null; try { j = await r.json(); } catch (e) {}
+    let j = null; try { j = await r.json(); } catch (e) { }
     throw mapError('deepseek', r.status, j);
   }
 
   const reader = r.body.getReader(), dec = new TextDecoder();
   let buf = '', text = '', reasoning = '', truncated = false;
-  for (;;) {
+  for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -299,7 +312,7 @@ async function callDeepSeek(model, turns, imgs, opts) {
         if (d && d.reasoning_content) reasoning += d.reasoning_content; // R1 的思维链，不计入正文
         if (d && d.content) {
           text += d.content;
-          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) {} }
+          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) { } }
         }
         if (ev.choices && ev.choices[0] && ev.choices[0].finish_reason === 'length') truncated = true;
       }
@@ -309,10 +322,8 @@ async function callDeepSeek(model, turns, imgs, opts) {
   return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
 }
 
-async function callZhipu(model, turns, imgs, opts) {
-  const key = getZPKey();
-  if (!key) throw { code: 'no_zhipu_key', message: '还没有填智谱 API Key。在页面顶部「Zhipu Key」里输入后再试，或把模型换回 Claude。' };
-
+async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) {
+  if (!key) throw { code: 'no_' + vendor + '_key', message: '还没有填写 ' + vendor + ' API Key，请在页面顶部输入后再试。' };
   const msgs = turns.map(t => ({ role: t.role, content: String(t.content) }));
   if (imgs.length) {
     // 跟 DeepSeek 一样是 OpenAI 兼容格式：最后一条 user 消息换成图文混排数组
@@ -328,7 +339,7 @@ async function callZhipu(model, turns, imgs, opts) {
 
   let r;
   try {
-    r = await fetch(ZHIPU_URL, {
+    r = await fetch(url, {
       method: 'POST',
       signal: opts.signal,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
@@ -336,16 +347,16 @@ async function callZhipu(model, turns, imgs, opts) {
     });
   } catch (e) {
     if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
-    throw { code: 'api_error', message: '连不上 open.bigmodel.cn（网络或代理问题）：' + (e && e.message ? e.message : e) };
+    throw { code: 'api_error', message: '连不上 ' + new URL(url).host + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
   }
   if (!r.ok) {
-    let j = null; try { j = await r.json(); } catch (e) {}
-    throw mapError('zhipu', r.status, j);
+    let j = null; try { j = await r.json(); } catch (e) { }
+    throw mapError(vendor, r.status, j);
   }
 
   const reader = r.body.getReader(), dec = new TextDecoder();
   let buf = '', text = '', truncated = false;
-  for (;;) {
+  for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -360,7 +371,7 @@ async function callZhipu(model, turns, imgs, opts) {
         const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
         if (d && d.content) {
           text += d.content;
-          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) {} }
+          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) { } }
         }
         if (ev.choices && ev.choices[0] && ev.choices[0].finish_reason === 'length') truncated = true;
       }
@@ -368,6 +379,14 @@ async function callZhipu(model, turns, imgs, opts) {
   }
   if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
   return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
+}
+
+async function callZhipu(model, turns, imgs, opts) {
+  return await callOpenAICompatible('zhipu', ZHIPU_URL, getZPKey(), model, turns, imgs, opts);
+}
+
+async function callApex(model, turns, imgs, opts) {
+  return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, opts);
 }
 
 async function callAPI(input, options) {
@@ -381,6 +400,9 @@ async function callAPI(input, options) {
   }
   if (isZhipu(model)) {
     return await callZhipu(model, turns, imgs, opts); // 列表里的智谱模型全部支持图片，不需要 fallback
+  }
+  if (isApex(model)) {
+    return await callApex(model, turns, imgs, opts);
   }
   if (isDeepSeek(model)) {
     if (imgs.length && !visionCapable(model)) {
@@ -445,6 +467,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const input = document.getElementById('apiKey');
   const dsInput = document.getElementById('dsApiKey');
   const zpInput = document.getElementById('zpApiKey');
+  const apexInput = document.getElementById('apexApiKey');
   const sel = document.getElementById('modelSel');
   const state = document.getElementById('keyState');
   const ws = document.getElementById('wsId');
@@ -460,14 +483,17 @@ document.addEventListener('DOMContentLoaded', function () {
   input.value = getKey();
   if (dsInput) dsInput.value = getDSKey();
   if (zpInput) zpInput.value = getZPKey();
+  if (apexInput) apexInput.value = getApexKey();
 
   const apiKeyField = document.getElementById('apiKeyField');
   const syncVendorUI = () => {
     const m = getModel();
+    const apex = isApex(m);
     if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
     if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
+    if (apexInput) apexInput.parentElement.hidden = !apex;
     // 分享链接进来的不用填自己的 Key；选了 DeepSeek/智谱时也不需要看到 Anthropic 的输入框
-    if (apiKeyField) apiKeyField.hidden = isShared(m) || isDeepSeek(m) || isZhipu(m);
+    if (apiKeyField) apiKeyField.hidden = isShared(m) || isDeepSeek(m) || isZhipu(m) || apex;
   };
 
   const syncBtn = document.getElementById('syncBtn');
@@ -477,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function () {
       syncBtn.hidden = true;
     } else {
       syncBtn.addEventListener('click', () => {
-        const cfg = { anthropicKey: getKey(), dsKey: getDSKey(), zpKey: getZPKey(), wsId: getWS(), model: getModel() };
+        const cfg = { anthropicKey: getKey(), dsKey: getDSKey(), zpKey: getZPKey(), apexKey: getApexKey(), wsId: getWS(), model: getModel() };
         if (!cfg.anthropicKey && !cfg.dsKey && !cfg.zpKey) { alert(bridgeT('bridge.syncNoKey')); return; }
         const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
         window.open(SYNC_TARGET_URL + '#sync=' + encoded, '_blank');
@@ -491,10 +517,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const model = getModel();
     const ds = isDeepSeek(model);
     const zp = isZhipu(model);
+    const apex = isApex(model);
     const vision = visionCapable(model);
     const aOk = /^sk-ant-/.test(getKey());
     const dsOk = /^sk-/.test(getDSKey());
     const zpOk = getZPKey().length > 10;
+    const apexOk = getApexKey().length > 10;
     const T = bridgeT;
     if (isShared(model)) {
       const label = getShareLabel();
@@ -503,6 +531,9 @@ document.addEventListener('DOMContentLoaded', function () {
     } else if (zp) {
       state.textContent = zpOk ? T('bridge.zpSaved') : T('bridge.zpNeedKey');
       state.className = zpOk ? 'keystate ok' : 'keystate';
+    } else if (apex) {
+      state.textContent = apexOk ? T('bridge.apexSaved') : T('bridge.apexNeedKey');
+      state.className = apexOk ? 'keystate ok' : 'keystate';
     } else if (!ds) {
       state.textContent = aOk
         ? T('bridge.saved') + (getWS() ? '（' + T('auth.workspace') + ' ' + getWS().slice(0, 18) + '…）' : '')
@@ -542,12 +573,17 @@ document.addEventListener('DOMContentLoaded', function () {
     zpInput.addEventListener('change', () => { setZPKey(zpInput.value); paint(); });
     zpInput.addEventListener('blur', () => { setZPKey(zpInput.value); paint(); });
   }
+  if (apexInput) {
+    apexInput.addEventListener('change', () => { setApexKey(apexInput.value); paint(); });
+    apexInput.addEventListener('blur', () => { setApexKey(apexInput.value); paint(); });
+  }
   sel.addEventListener('change', () => { setModel(sel.value); paint(); });
   renderModelOptions(sel); // 若刚从本地页面同步过来，模型可能变了，重新按当前值渲染下拉
   sel.value = getModel();
   input.value = getKey();
   if (dsInput) dsInput.value = getDSKey();
   if (zpInput) zpInput.value = getZPKey();
+  if (apexInput) apexInput.value = getApexKey();
   if (ws) ws.value = getWS();
   paint();
   if (__syncImported) { state.textContent = bridgeT('bridge.imported'); state.className = 'keystate ok'; }
