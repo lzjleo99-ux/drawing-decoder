@@ -83,7 +83,7 @@ async function boot() {
   const cap = $('#capState');
   if (!c || typeof c.use !== 'function') {
     cap.className = 'cap off'; cap.innerHTML = '<i></i>' + t('cap.offline');
-    $('#runTeach').title = $('#runEng').title = '请在 claude.ai 网页中打开本页面以启用解析';
+    $('#runTeach').title = $('#runEng').title = t('cap.openInClaude');
     return;
   }
   try { S.sample = await c.use('sample'); } catch (e) { S.sample = null; }
@@ -100,7 +100,12 @@ async function boot() {
         '，提示词上限 ' + (probed.maxPromptBytes || 65536) + ' 字节'
       : '本环境没有返回图片能力信息，解析时仍会尝试发送图片；若被拒绝会自动改走文字通道。';
     const mt = real && probed.images.mediaTypes;
-    if (mt) $('#file').setAttribute('accept', mt.join(',') + ',.pdf,.dxf,.txt,.nc,.gcode,.tap,.cnc,.iso,.mpf,.spf,.prg,.src,.mod,.st,.scl,.awl,.il,.lad,.ls,.bas,.for,.asm,.pmc,.plc,.h,.csv,.log,.dat');
+    if (mt) {
+      // 在原有 accept 的基础上追加，不能整体替换：替换会把 image/*（含 .svg）、.docx
+      // 从文件选择框里挤掉——这两个格式 intake() 明确支持，只是选择框点不到了
+      const cur = $('#file').getAttribute('accept') || '';
+      $('#file').setAttribute('accept', mt.join(',') + ',' + cur);
+    }
   } else {
     cap.className = 'cap off'; cap.innerHTML = '<i></i>' + t('cap.unavailable');
   }
@@ -603,13 +608,14 @@ function paintSource() {
     pre.textContent = s.text.split(/\r\n|\r|\n/).slice(0, 14).join('\n');
     box.appendChild(pre);
   }
-  const rows = [['文件', s.name], ['大小', fmtSize(s.size)]];
+  // 标签走 t('meta.*')：TX_MAP 里没有"文件/大小"这些单字键，直接写中文在英文/塞尔维亚语界面不会翻
+  const rows = [[t('meta.file'), s.name], [t('meta.size'), fmtSize(s.size)]];
   if (s.kind === 'image') {
-    rows.push(['像素', s.w + ' × ' + s.h]);
-    if (s.note) rows.push(['来源', s.note]);
+    rows.push([t('meta.pixels'), s.w + ' × ' + s.h]);
+    if (s.note) rows.push([t('meta.source'), s.note]);
   } else {
-    rows.push(['行数', s.lines.toLocaleString()]);
-    if (s.truncated) rows.push(['注意', t('meta.truncated')]);
+    rows.push([t('meta.lines'), s.lines.toLocaleString()]);
+    if (s.truncated) rows.push([t('meta.note'), t('meta.truncated')]);
   }
   meta.innerHTML = rows.map(([k, v]) => '<dt>' + esc(TX(k)) + '</dt><dd>' + esc(v) + '</dd>').join('');
   const oldStrip = document.getElementById('pageStrip');
@@ -1258,9 +1264,11 @@ async function checkImages() {
   } catch (e) {
     const c = e && e.code;
     if (c === 'cancelled') throw e;
-    // 只有明确的"本视图不能发图片"才判定不可用；限流、拒绝授权等另说
+    // 缺 Key（Anthropic/DeepSeek/智谱/Apex）和拒绝授权是配置问题，不是"图片通道不可用"，
+    // 直接抛出去让用户补配置；否则会被缓存成"图片可用"，后面每一步都白跑一遍再报一遍错
+    if (c === 'not_granted' || /^no_/.test(c)) throw e;
+    // 只有明确的"本视图不能发图片"才判定不可用；限流等另说
     S.imagesOK = (c === 'images_unavailable') ? false : true;
-    if (c === 'not_granted' || c === 'no_anthropic_key' || c === 'no_deepseek_key') throw e;
   }
   markCap();
   return S.imagesOK;
@@ -1313,7 +1321,7 @@ function ocrToText(o) {
 }
 
 async function run(mode) {
-  if (!S.sample) { toast('当前环境无法调用 Claude，请在 claude.ai 网页中打开本页面。', 5500); return; }
+  if (!S.sample) { toast(t('toast.noSample'), 5500); return; }
   if (!S.src || S.busy) return;
   S.mode = mode === 'teach' ? 'teach' : 'eng';
   S.busy = true; S.abort = new AbortController(); syncRun();
@@ -3062,7 +3070,11 @@ function saveHistory() {
     while (list.length > 12) list.pop();
     for (let i = 0; i < 4; i++) {
       try { localStorage.setItem(HK, JSON.stringify(list)); break; }
-      catch (e) { list.pop(); if (list.some(x => x.img)) list.forEach(x => { x.img = ''; }); } // 存不下就先丢缩略图，再丢最老的条目
+      // 按降级顺序处理：先丢全部缩略图再重试，还存不下才丢最老的条目（不能一上来就 pop）
+      catch (e) {
+        if (list.some(x => x.img)) list.forEach(x => { x.img = ''; });
+        else list.pop();
+      }
     }
   } catch (e) { /* 存储不可用时忽略 */ }
   renderHistory();
@@ -3126,8 +3138,8 @@ function paintHistorySource(h) {
     box.appendChild(p);
   }
   const rows = [];
-  if (h.src && h.src.name) rows.push(['文件', h.src.name]);
-  if (h.src && h.src.size) rows.push(['大小', fmtSize(h.src.size)]);
+  if (h.src && h.src.name) rows.push([t('meta.file'), h.src.name]);
+  if (h.src && h.src.size) rows.push([t('meta.size'), fmtSize(h.src.size)]);
   if (meta) meta.innerHTML = rows.map(([k, v]) => '<dt>' + esc(TX(k)) + '</dt><dd>' + esc(v) + '</dd>').join('');
   const oldStrip = document.getElementById('pageStrip');
   if (oldStrip) oldStrip.remove();

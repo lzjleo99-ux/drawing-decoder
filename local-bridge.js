@@ -469,7 +469,11 @@ function renderModelOptions(sel) {
     const nameShown = m.name + (m.textOnly ? bridgeT('bridge.textOnlySuffix') : '');
     return '<option value="' + m.id + '">' + nameShown + ' — ' + bridgeT(m.noteKey) + '</option>';
   }).join('');
-  sel.value = shown.some(m => m.id === cur) ? cur : (shown[0] && shown[0].id);
+  const fallback = shown.some(m => m.id === cur) ? cur : (shown[0] && shown[0].id);
+  // 当前存的模型不在可显示列表里时，把回落值写回存储：否则下拉框显示 A、
+  // 实际调用却还在走被隐藏的那个模型，两边对不上
+  if (fallback && fallback !== cur) setModel(fallback);
+  sel.value = fallback;
 }
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -497,6 +501,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const apiKeyField = document.getElementById('apiKeyField');
   const syncVendorUI = () => {
     const m = getModel();
+    const ds = isDeepSeek(m);
     const apex = isApex(m);
     // 追问框（Ask 框）可以选一个跟主下拉框不一样的模型（比如主模型选智谱，追问选 Apex 的 GLM-5.2）；
     // Key 输入框要不要出现，得看主模型 + 追问模型两边加起来一共用到了哪些厂商，不能只看主下拉框。
@@ -507,9 +512,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
     if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
     if (apexInput) apexInput.parentElement.hidden = !(apex || askNeedsApex);
-    // 分享链接进来的不用填自己的 Key；选了 DeepSeek/智谱时也不需要看到 Anthropic 的输入框——
-    // 除非追问框还在用 Claude，那还是要露出来给填
-    if (apiKeyField) apiKeyField.hidden = (isShared(m) || isDeepSeek(m) || isZhipu(m) || apex) && !askNeedsAnthropic;
+    // 分享链接进来的不用填自己的 Key；选了智谱/Apex/能自己看图的 DeepSeek 时也不需要
+    // 看到 Anthropic 的输入框——但纯文本 DeepSeek（V3/R1）分析图片会自动改走 Anthropic，
+    // 状态栏会提示"需要再填一个 Anthropic Key"，这时输入框必须露出来，否则提示没有着落。
+    // 以上都排除后还要看追问框：追问在用 Claude 时仍要露出来给填
+    if (apiKeyField) apiKeyField.hidden = (isShared(m) || isZhipu(m) || apex || (ds && visionCapable(m))) && !askNeedsAnthropic;
   };
 
   const syncBtn = document.getElementById('syncBtn');
