@@ -171,6 +171,12 @@ a{color:var(--accent)}
 /* title block */
 .tblock{border:1px solid var(--line2);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:22px}
 @media (max-width:700px){.tblock{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.titleVal{display:flex;align-items:baseline;gap:8px}
+.titleEditBtn{background:none;border:0;padding:2px 4px;font-size:15px;line-height:1;cursor:pointer;color:var(--ink3);flex-shrink:0}
+.titleEditBtn:hover{color:var(--accent)}
+.titleEditRow{display:flex;gap:8px;align-items:center;width:100%}
+.titleEditRow input{flex:1;min-width:0;font:inherit;font-weight:700;padding:3px 6px;border:1px solid var(--accent);border-radius:2px;background:var(--sheet);color:var(--ink)}
+.titleEditRow button{flex-shrink:0;font-size:12px;padding:4px 9px;border:1px solid var(--line);border-radius:2px;background:var(--sheet);color:var(--ink);cursor:pointer}
 .tblock .cell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:7px 10px;min-width:0}
 .tblock .cell:nth-child(4n){border-right:0}
 @media (max-width:700px){.tblock .cell:nth-child(4n){border-right:1px solid var(--line)}.tblock .cell:nth-child(2n){border-right:0}}
@@ -342,17 +348,28 @@ body.mdd-unlocked #authGate{display:none}
 /* ---------- admin entry + modal ---------- */
 #adminBtn{display:none}
 body.mdd-admin #adminBtn{display:inline-flex}
-.historyWrap{position:relative}
-.historyMenu{position:absolute;right:0;top:calc(100% + 8px);width:340px;max-width:calc(100vw - 32px);
-  max-height:70vh;overflow-y:auto;background:var(--sheet);border:1px solid var(--line2);
-  border-radius:3px;box-shadow:var(--shadow);z-index:170;padding:14px}
-.historyMenuHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
-.historyMenuHead h3{margin:0;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
-.historyMenuActs{display:flex;gap:12px;flex-shrink:0}
 .linklike{background:none;border:0;padding:0;font-size:11.5px;color:var(--accent);cursor:pointer;text-decoration:underline}
 .linklike:hover{color:var(--accent-ink)}
-.historyMenu .hist li{border-bottom:1px dashed var(--line)}
-.historyMenu .hist .empty{padding:10px 2px;color:var(--ink3);font-size:12.5px;line-height:1.55}
+.historyPage{position:fixed;inset:0;z-index:180;background:var(--paper);overflow-y:auto}
+.historyPageHead{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:16px 24px;background:var(--sheet);border-bottom:1px solid var(--line2)}
+.historyPageHead h2{margin:0;font-size:16px;flex-shrink:0}
+.historyPageActs{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto}
+.historyPageActs input[type=search]{font-size:13px;padding:7px 10px;border:1px solid var(--line);
+  border-radius:2px;background:var(--sheet2);color:var(--ink);min-width:200px}
+.historyBody{max-width:1040px;margin:0 auto;padding:22px 24px 60px}
+.historyGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.histCard{display:flex;flex-direction:column;text-align:left;background:var(--sheet);border:1px solid var(--line);
+  border-radius:3px;overflow:hidden;cursor:pointer;color:inherit;font-family:inherit;padding:0}
+.histCard:hover{border-color:var(--accent)}
+.histCard .thumb{width:100%;aspect-ratio:16/10;background:var(--sheet2);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.histCard .thumb img{width:100%;height:100%;object-fit:cover}
+.histCard .thumb .ph{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+.histCard .histBody{padding:10px 12px}
+.histCard .ht{display:block;font-weight:600;font-size:13px;margin-bottom:3px}
+.histCard .hd{display:block;font-size:11px;color:var(--ink3)}
+.historyEmpty{color:var(--ink3);font-size:13px;padding:30px 2px;text-align:center}
+@media (max-width:560px){.historyPageHead{padding:12px 14px}.historyBody{padding:16px 14px 40px}}
 .modalOverlay{position:fixed;inset:0;z-index:150;display:flex;align-items:center;justify-content:center;
   background:rgba(15,26,33,.55);padding:20px}
 .modalBox{width:100%;max-width:640px;max-height:86vh;overflow-y:auto;background:var(--sheet);
@@ -437,19 +454,7 @@ body.mdd-admin #adminBtn{display:inline-flex}
   <div class="top-actions">
     <select class="langsel" id="langSel" aria-label="Language"></select>
     <span class="cap" id="capState"><i></i><span data-i18n="cap.connecting"></span></span>
-    <div class="historyWrap">
-      <button class="btn ghost sm" id="historyBtn" type="button" data-i18n="panel.history.title"></button>
-      <div class="historyMenu" id="historyMenu" hidden>
-        <div class="historyMenuHead">
-          <h3 data-i18n="panel.history.title"></h3>
-          <div class="historyMenuActs">
-            <button type="button" id="historyBackBtn" class="linklike" data-i18n="novision.back"></button>
-            <button type="button" id="historyClearBtn" class="linklike" data-i18n="btn.clearHist"></button>
-          </div>
-        </div>
-        <ul class="hist" id="histMenuList"></ul>
-      </div>
-    </div>
+    <button class="btn ghost sm" id="historyBtn" type="button" data-i18n="panel.history.title"></button>
     <button class="btn ghost sm" id="adminBtn" type="button" data-i18n="admin.button"></button>
     <button class="btn ghost sm" id="logoutBtn" type="button" data-i18n="auth.logout"></button>
   </div>
@@ -601,6 +606,21 @@ body.mdd-admin #adminBtn{display:inline-flex}
 
 <div id="printhost" aria-hidden="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
+
+<div id="historyPage" class="historyPage" hidden>
+  <div class="historyPageHead">
+    <h2 data-i18n="panel.history.title"></h2>
+    <div class="historyPageActs">
+      <input type="search" id="historySearch" data-i18n-ph="hist.searchPh" placeholder="">
+      <button type="button" id="historyBackBtn" class="btn ghost sm" data-i18n="novision.back"></button>
+      <button type="button" id="historyClearBtn" class="btn ghost sm" data-i18n="btn.clearHist"></button>
+      <button type="button" id="historyCloseBtn" class="btn ghost sm" aria-label="Close">&times;</button>
+    </div>
+  </div>
+  <div class="historyBody">
+    <div class="historyGrid" id="historyGrid"></div>
+  </div>
+</div>
 
 <div id="adminModal" class="modalOverlay" hidden>
   <div class="modalBox">

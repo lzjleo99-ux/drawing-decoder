@@ -13,6 +13,19 @@ const has = (v) => Array.isArray(v) ? v.length > 0 : txt(v).length > 0;
 const arr = (v) => Array.isArray(v) ? v.filter(x => x != null && x !== '') : [];
 const bytesOf = (s) => new TextEncoder().encode(s).length;
 const fmtSize = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+// 存进历史记录用的小缩略图：压缩到 maxSide 以内、JPEG 低质量，避免 localStorage 很快爆掉
+function bitmapToThumbDataURL(bitmap, maxSide) {
+  try {
+    const k = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(bitmap.width * k));
+    cv.height = Math.max(1, Math.round(bitmap.height * k));
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(bitmap, 0, 0, cv.width, cv.height);
+    return cv.toDataURL('image/jpeg', 0.6);
+  } catch (e) { return ''; }
+}
 const nowStamp = () => {
   const d = new Date(), p = (x) => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -1644,6 +1657,7 @@ async function finishReport(kind, data, mat, extras) {
     kind: kind, mode: S.mode, data: data, mat: mat, extra: ex.extra || null, ocr: ex.ocr || null,
     planText: ex.planText || '', clsNote: ex.cls || null, qa: [], at: nowStamp(), lang: lang,
     src: { name: S.src.name, size: S.src.size, note: S.src.note || '', kind: S.src.kind },
+    thumb: (S.src.kind === 'image' && S.src.bitmap) ? bitmapToThumbDataURL(S.src.bitmap, 480) : '',
   };
   S.demo = false;
   renderReport();
@@ -1715,8 +1729,28 @@ async function translateReportContent(targetLang) {
 }
 
 /* ============ 报告渲染 ============ */
+function startEditTitle() {
+  if (!S.report || S.demo) return;
+  const val = $('.titleVal'); if (!val) return;
+  const cur = reportTitle();
+  val.innerHTML = '<span class="titleEditRow">' +
+    '<input id="titleEditInput" type="text" maxlength="120" value="' + esc(cur) + '">' +
+    '<button type="button" id="titleSaveBtn">✓</button>' +
+    '<button type="button" id="titleCancelBtn">✕</button></span>';
+  const input = $('#titleEditInput'); input.focus(); input.select();
+}
+function commitEditTitle() {
+  const input = $('#titleEditInput'); if (!input || !S.report) return;
+  const v = input.value.trim();
+  S.report.customTitle = v || null;
+  renderReport();
+  saveHistory();
+  toast(t('title.renamed'));
+}
+
 function reportTitle() {
   const r = S.report; if (!r) return t('title.untitled');
+  if (has(r.customTitle)) return r.customTitle;
   if (r.kind === 'code') return (txt(r.data.language) || '设备程序') + ' · ' + (txt(r.data.controller) || '解析');
   const tb = r.data.titleBlock || {};
   return txt(tb.title) || txt(r.data.oneLiner).slice(0, 26) || (r.kind === 'chart' ? '工程图表' : '机械图纸');
@@ -1790,10 +1824,10 @@ function matCards(mat) {
   }).join('');
 }
 
-function titleBlock(r) {
+function titleBlock(r, forPrint) {
   const d = r.data, isCode = r.kind === 'code', isChart = r.kind === 'chart', isDraw = !isCode && !isChart;
   const tb = (isCode ? null : d.titleBlock) || {};
-  const name = isCode ? (txt(d.language) || TX('设备程序'))
+  const name = has(r.customTitle) ? r.customTitle : isCode ? (txt(d.language) || TX('设备程序'))
     : (txt(tb.title) || txt(d.oneLiner).slice(0, 30) || (isChart ? TX('工程图表') : TX('机械图纸')));
   const cells = [];
   const add = (k, v) => { if (has(v) && txt(v) !== '未标注') cells.push('<div class="cell"><span class="k">' + esc(TX(k)) + '</span><span class="v">' + esc(v) + '</span></div>'); };
@@ -1818,7 +1852,9 @@ function titleBlock(r) {
   const cf = Math.max(0, Math.min(100, parseInt(d.confidence, 10) || 0));
   if (cf) cells.push('<div class="cell"><span class="k">' + esc(TX('识读把握')) + '</span><div class="gauge"><span class="track"><i style="width:' + cf + '%"></i></span><b>' + cf + '%</b></div></div>');
   while (cells.length % 4 !== 0) cells.push('<div class="cell"></div>');
-  return '<div class="tblock"><div class="cell wide"><span class="k">' + (isCode ? 'Program' : isChart ? 'Chart' : 'Drawing') + ' · ' + esc(TX('标题栏')) + '</span><span class="v">' + esc(name) + '</span></div>' + cells.join('') + '</div>';
+  const editBtn = (r.demo || forPrint) ? '' : '<button type="button" class="titleEditBtn" id="titleEditBtn" title="' + esc(t('title.edit')) + '" aria-label="' + esc(t('title.edit')) + '">&#9998;</button>';
+  return '<div class="tblock"><div class="cell wide"><span class="k">' + (isCode ? 'Program' : isChart ? 'Chart' : 'Drawing') + ' · ' + esc(TX('标题栏')) + '</span>' +
+    '<span class="v titleVal">' + esc(name) + editBtn + '</span></div>' + cells.join('') + '</div>';
 }
 
 function drawingSections(d, mat) {
@@ -2046,7 +2082,7 @@ function reportHTML(r, forPrint) {
   const disclaimer = '<div class="note-box">' + t('disclaimer.html') +
     (r.src && r.src.name ? '　' + esc(TX('源文件')) + '：' + esc(r.src.name) : '') + '</div>';
   return (r.demo && !forPrint ? '<div class="demo-flag">' + esc(t('src.example')) + '</div>' : '') +
-    titleBlock(r) + body + qaBlock(r.qa) + disclaimer;
+    titleBlock(r, forPrint) + body + qaBlock(r.qa) + disclaimer;
 }
 
 function renderReport() {
@@ -3010,12 +3046,14 @@ function saveHistory() {
   try {
     const list = loadHist().filter(x => x.id !== S.report.id);
     if (!S.report.id) S.report.id = 'r' + Date.now();
-    list.unshift({ id: S.report.id, title: reportTitle(), kind: S.report.kind, mode: S.report.mode, at: S.report.at,
+    list.unshift({ id: S.report.id, title: reportTitle(), customTitle: S.report.customTitle || null,
+      kind: S.report.kind, mode: S.report.mode, at: S.report.at,
       data: S.report.data, mat: S.report.mat, extra: S.report.extra, ocr: S.report.ocr, lang: S.report.lang || 'zh',
-      planText: S.report.planText, qa: S.report.qa, src: S.report.src });
+      planText: S.report.planText, qa: S.report.qa, src: S.report.src, img: S.report.thumb || '' });
     while (list.length > 12) list.pop();
     for (let i = 0; i < 4; i++) {
-      try { localStorage.setItem(HK, JSON.stringify(list)); break; } catch (e) { list.pop(); }
+      try { localStorage.setItem(HK, JSON.stringify(list)); break; }
+      catch (e) { list.pop(); if (list.some(x => x.img)) list.forEach(x => { x.img = ''; }); } // 存不下就先丢缩略图，再丢最老的条目
     }
   } catch (e) { /* 存储不可用时忽略 */ }
   renderHistory();
@@ -3027,18 +3065,72 @@ function historyListHTML(list) {
     '<span class="hd">' + esc(TX(h.kind === 'code' ? '代码' : h.kind === 'chart' ? '图表' : '图纸')) +
     ' · ' + esc(TX(h.mode === 'teach' ? '教学' : '工程')) + ' · ' + esc(h.at) + '</span></button></li>').join('');
 }
-// 侧栏历史面板和右上角的历史下拉共用同一份 localStorage 数据，两处一起刷新
+function historyMatches(h, q) {
+  if (!q) return true;
+  const hay = [h.title, h.kind, h.data && h.data.oneLiner, h.data && h.data.docType, h.src && h.src.name]
+    .filter(has).join(' ').toLowerCase();
+  return hay.indexOf(q.toLowerCase()) >= 0;
+}
+function historyCardsHTML(list, q) {
+  const filtered = list.filter(h => historyMatches(h, q));
+  if (!filtered.length) return '<div class="historyEmpty">' + esc(t(list.length ? 'hist.noMatch' : 'hist.empty')) + '</div>';
+  return filtered.map(h => '<button type="button" class="histCard" data-id="' + esc(h.id) + '">' +
+    '<span class="thumb">' + (h.img ? '<img src="' + esc(h.img) + '" alt="">' : '<span class="ph">' + esc(TX(h.kind === 'code' ? '代码' : h.kind === 'chart' ? '图表' : '图纸')) + '</span>') + '</span>' +
+    '<span class="histBody"><span class="ht">' + esc(h.title) + '</span>' +
+    '<span class="hd">' + esc(TX(h.mode === 'teach' ? '教学' : '工程')) + ' · ' + esc(h.at) + '</span></span></button>').join('');
+}
+function renderHistoryPage() {
+  const grid = $('#historyGrid'); if (!grid) return;
+  const q = ($('#historySearch') && $('#historySearch').value || '').trim();
+  grid.innerHTML = historyCardsHTML(loadHist(), q);
+}
+// 侧栏历史面板和右上角"历史记录"整页共用同一份 localStorage 数据，两处一起刷新
 function renderHistory() {
   const list = loadHist();
   const ul = $('#hist'); if (ul) ul.innerHTML = historyListHTML(list);
-  const menu = $('#histMenuList'); if (menu) menu.innerHTML = historyListHTML(list);
+  const page = $('#historyPage');
+  if (page && !page.hidden) renderHistoryPage();
+}
+function openHistoryPage() {
+  const page = $('#historyPage'); if (!page) return;
+  const s = $('#historySearch'); if (s) s.value = '';
+  renderHistoryPage();
+  page.hidden = false;
+}
+function closeHistoryPage() {
+  const page = $('#historyPage'); if (page) page.hidden = true;
+}
+function paintHistorySource(h) {
+  const box = $('#srcBox'), meta = $('#srcMeta'), kind = $('#srcKind');
+  if (!box) return;
+  if (kind) kind.textContent = t('src.history');
+  box.innerHTML = '';
+  if (h.img) {
+    const img = document.createElement('img');
+    img.src = h.img; img.alt = '';
+    img.style.cssText = 'max-height:220px;max-width:100%;width:auto;height:auto;border-radius:2px';
+    box.appendChild(img);
+  } else {
+    const p = document.createElement('div');
+    p.style.cssText = 'padding:20px;text-align:center;color:var(--ink3);font-size:12.5px';
+    p.textContent = t('hist.noImage');
+    box.appendChild(p);
+  }
+  const rows = [];
+  if (h.src && h.src.name) rows.push(['文件', h.src.name]);
+  if (h.src && h.src.size) rows.push(['大小', fmtSize(h.src.size)]);
+  if (meta) meta.innerHTML = rows.map(([k, v]) => '<dt>' + esc(TX(k)) + '</dt><dd>' + esc(v) + '</dd>').join('');
+  const oldStrip = document.getElementById('pageStrip');
+  if (oldStrip) oldStrip.remove();
 }
 function openHistory(id) {
   const h = loadHist().find(x => x.id === id); if (!h) return;
   S.report = { kind: h.kind, mode: h.mode || 'eng', data: h.data, mat: h.mat, extra: h.extra || null,
     ocr: h.ocr || null, planText: h.planText || '', qa: h.qa || [], at: h.at, src: h.src || {}, id: h.id,
-    lang: h.lang || 'zh' };
+    lang: h.lang || 'zh', customTitle: h.customTitle || null, thumb: h.img || '' };
   S.demo = false; renderReport(); syncRun();
+  paintHistorySource(h);
+  closeHistoryPage();
   $('#reportState').textContent = t('reportState.history') + ' · ' + h.at;
   $('#sheet').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -3123,7 +3215,18 @@ function bindUI() {
       copyText(chatPrompt(S.mode), t('toast.chatPromptCopied'));
     } else if (e.target.closest('#backDemoBtn')) {
       showExample(); $('#reportState').textContent = t('report.state.demo');
+    } else if (e.target.closest('#titleEditBtn')) {
+      startEditTitle();
+    } else if (e.target.closest('#titleSaveBtn')) {
+      commitEditTitle();
+    } else if (e.target.closest('#titleCancelBtn')) {
+      renderReport();
     }
+  });
+  $('#frame').addEventListener('keydown', (e) => {
+    if (!e.target.closest('#titleEditInput')) return;
+    if (e.key === 'Enter') { e.preventDefault(); commitEditTitle(); }
+    else if (e.key === 'Escape') { e.preventDefault(); renderReport(); }
   });
   $('#hist').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-id]'); if (b) openHistory(b.dataset.id);
@@ -3133,26 +3236,24 @@ function bindUI() {
     renderHistory(); toast(t('toast.historyCleared'));
   });
 
-  const historyBtn = $('#historyBtn'), historyMenu = $('#historyMenu');
-  if (historyBtn && historyMenu) {
-    historyBtn.addEventListener('click', () => {
-      const opening = historyMenu.hidden;
-      historyMenu.hidden = !opening;
-      if (opening) renderHistory();
+  const historyBtn = $('#historyBtn');
+  if (historyBtn) historyBtn.addEventListener('click', openHistoryPage);
+  const historyCloseBtn = $('#historyCloseBtn');
+  if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistoryPage);
+  const historyPage = $('#historyPage');
+  if (historyPage) {
+    historyPage.addEventListener('click', (e) => {
+      if (e.target === historyPage) closeHistoryPage(); // 点击页面空白处（不是卡片）也能关闭
+      const card = e.target.closest('.histCard'); if (card) openHistory(card.dataset.id);
     });
-    document.addEventListener('click', (e) => {
-      if (!historyMenu.hidden && !e.target.closest('.historyWrap')) historyMenu.hidden = true;
-    });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') historyMenu.hidden = true; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !historyPage.hidden) closeHistoryPage(); });
   }
-  $('#histMenuList').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-id]');
-    if (b) { openHistory(b.dataset.id); if (historyMenu) historyMenu.hidden = true; }
-  });
+  const historySearch = $('#historySearch');
+  if (historySearch) historySearch.addEventListener('input', renderHistoryPage);
   const historyBackBtn = $('#historyBackBtn');
   if (historyBackBtn) historyBackBtn.addEventListener('click', () => {
     showExample(); $('#reportState').textContent = t('report.state.demo');
-    if (historyMenu) historyMenu.hidden = true;
+    closeHistoryPage();
   });
   const historyClearBtn = $('#historyClearBtn');
   if (historyClearBtn) historyClearBtn.addEventListener('click', () => {
