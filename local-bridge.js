@@ -392,14 +392,10 @@ async function callZhipu(model, turns, imgs, opts) {
 }
 
 async function callApex(model, turns, imgs, opts) {
-  const o = opts;
-  // GLM 系模型自带的联网搜索工具（智谱官方 chat/completions 接口的写法）；Apex 是否会把这个参数
-  // 原样透传给智谱后端未经验证——已知有别的中转网关不透传这个参数的先例，实际效果需要用真实 Key 测过才能确定。
-  if (o.glmWebSearch && /GLM/i.test(model)) {
-    const merged = Object.assign({}, o, { tools: (o.tools || []).concat([{ type: 'web_search', web_search: { enable: true, search_result: true } }]) });
-    return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, merged);
-  }
-  return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, o);
+  // 曾经试过给 GLM 系模型加智谱官方文档写的 web_search 工具，用真实 Key 实测过：
+  // Apex 中转不支持这个参数，一加就直接报错（bad_response_status_code），换成顶层 web_search
+  // 字段则是静默不生效、模型会瞎编答案——所以这里不发这个参数，均按普通对话调用。
+  return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, opts);
 }
 
 async function callAPI(input, options) {
