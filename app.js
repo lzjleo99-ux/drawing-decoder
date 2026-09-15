@@ -135,8 +135,8 @@ function initLangSwitch() {
 const LS_ASK_MODEL = 'mdd.askmodel';
 const ASK_MODELS = [
   { id: 'claude', label: 'ask.model.claude', overrideModel: 'claude-opus-5', webSearch: true, canImage: true },
-  { id: 'apex-deepseek', label: 'ask.model.apexDeepseek', overrideModel: 'TPK/DeepSeek-V4-Flash', webSearch: false, canImage: false },
-  { id: 'apex-glm', label: 'ask.model.apexGlm', overrideModel: 'TPK/GLM-5.2', webSearch: false, canImage: false },
+  { id: 'apex-deepseek', label: 'ask.model.apexDeepseek', overrideModel: 'TPK/DeepSeek-V4-Flash', webSearch: false, canImage: false, maxPower: true },
+  { id: 'apex-glm', label: 'ask.model.apexGlm', overrideModel: 'TPK/GLM-5.2', webSearch: false, canImage: false, glmWebSearch: true, maxPower: true },
 ];
 function getAskModel() {
   try { return ASK_MODELS.find(m => m.id === localStorage.getItem(LS_ASK_MODEL)) || ASK_MODELS[0]; }
@@ -155,7 +155,12 @@ function setupAskModelSelector() {
   bar.hidden = false;
   refreshAskModelOptions();
   sel.value = getAskModel().id;
-  sel.addEventListener('change', () => { try { localStorage.setItem(LS_ASK_MODEL, sel.value); } catch (e) {} });
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem(LS_ASK_MODEL, sel.value); } catch (e) {}
+    // local-bridge.js 自己初始化时（DOMContentLoaded）会用 localStorage 里已保存的值算一次，
+    // 这里只处理"页面已经打开、用户中途切换追问模型"这种情况
+    if (typeof window.__refreshBridgeVendorUI === 'function') window.__refreshBridgeVendorUI();
+  });
 }
 
 function syncRun() {
@@ -3020,12 +3025,17 @@ async function ask(q) {
       '',
       '要求：' + (OUTPUT_LANG[getLang()] || OUTPUT_LANG.zh) + ' 直接回答，像资深工程师给同事讲解一样具体；结论先行，必要时分点。',
       '只依据上述分析结果与图片作答；资料里没有依据的，明确说明"图上没有体现，需要补充确认"，不要编造数值。',
-      askModel && askModel.webSearch ? '如果问题涉及最新资讯、标准版本或需要查证外部资料，可以使用联网搜索工具确认后再回答。' : '',
+      askModel && (askModel.webSearch || askModel.glmWebSearch) ? '如果问题涉及最新资讯、标准版本或需要查证外部资料，可以使用联网搜索工具确认后再回答。' : '',
       '控制在 400 字以内，不要 markdown 标题和代码块。',
     ].filter(Boolean).join('\n');
     const opts = { modelTier: 'complex', signal: S.abort.signal }; // 追问按最高强度跑
     if (hasImage) opts.images = S.report.imgs.slice(0, 1);
-    if (askModel) { opts.overrideModel = askModel.overrideModel; opts.webSearch = !!askModel.webSearch; }
+    if (askModel) {
+      opts.overrideModel = askModel.overrideModel;
+      opts.webSearch = !!askModel.webSearch;
+      opts.glmWebSearch = !!askModel.glmWebSearch;
+      opts.maxPower = !!askModel.maxPower;
+    }
     const r = await S.sample(prompt, opts);
     S.report.qa.push({ q, a: (r && r.text ? r.text : '').trim() });
     renderReport(); saveHistory();

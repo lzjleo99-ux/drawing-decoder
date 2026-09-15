@@ -339,7 +339,9 @@ async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) 
     }
     last.content = parts;
   }
-  const body = { model: model, messages: msgs, stream: true, max_tokens: 8192 };
+  const body = { model: model, messages: msgs, stream: true, max_tokens: opts.maxPower ? 32000 : 8192 };
+  if (opts.maxPower) body.thinking = { type: 'enabled' }; // 智谱系模型的"深度思考"开关，别的厂商没有就忽略
+  if (opts.tools && opts.tools.length) body.tools = opts.tools;
 
   let r;
   try {
@@ -390,7 +392,14 @@ async function callZhipu(model, turns, imgs, opts) {
 }
 
 async function callApex(model, turns, imgs, opts) {
-  return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, opts);
+  const o = opts;
+  // GLM 系模型自带的联网搜索工具（智谱官方 chat/completions 接口的写法）；Apex 是否会把这个参数
+  // 原样透传给智谱后端未经验证——已知有别的中转网关不透传这个参数的先例，实际效果需要用真实 Key 测过才能确定。
+  if (o.glmWebSearch && /GLM/i.test(model)) {
+    const merged = Object.assign({}, o, { tools: (o.tools || []).concat([{ type: 'web_search', web_search: { enable: true, search_result: true } }]) });
+    return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, merged);
+  }
+  return await callOpenAICompatible('Apex', APEX_URL, getApexKey(), model, turns, imgs, o);
 }
 
 async function callAPI(input, options) {
@@ -493,11 +502,18 @@ document.addEventListener('DOMContentLoaded', function () {
   const syncVendorUI = () => {
     const m = getModel();
     const apex = isApex(m);
+    // 追问框（Ask 框）可以选一个跟主下拉框不一样的模型（比如主模型选智谱，追问选 Apex 的 GLM-5.2）；
+    // Key 输入框要不要出现，得看主模型 + 追问模型两边加起来一共用到了哪些厂商，不能只看主下拉框。
+    let askId = 'claude';
+    try { askId = localStorage.getItem('mdd.askmodel') || 'claude'; } catch (e) {}
+    const askNeedsAnthropic = askId === 'claude';
+    const askNeedsApex = askId === 'apex-deepseek' || askId === 'apex-glm';
     if (dsInput) dsInput.parentElement.hidden = !isDeepSeek(m);
     if (zpInput) zpInput.parentElement.hidden = !isZhipu(m);
-    if (apexInput) apexInput.parentElement.hidden = !apex;
-    // 分享链接进来的不用填自己的 Key；选了 DeepSeek/智谱时也不需要看到 Anthropic 的输入框
-    if (apiKeyField) apiKeyField.hidden = isShared(m) || isDeepSeek(m) || isZhipu(m) || apex;
+    if (apexInput) apexInput.parentElement.hidden = !(apex || askNeedsApex);
+    // 分享链接进来的不用填自己的 Key；选了 DeepSeek/智谱时也不需要看到 Anthropic 的输入框——
+    // 除非追问框还在用 Claude，那还是要露出来给填
+    if (apiKeyField) apiKeyField.hidden = (isShared(m) || isDeepSeek(m) || isZhipu(m) || apex) && !askNeedsAnthropic;
   };
 
   const syncBtn = document.getElementById('syncBtn');
@@ -594,4 +610,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // 供 app.js 在切换界面语言时调用，刷新顶部工具条的翻译
   window.__refreshBridgeI18n = () => { renderModelOptions(sel); paint(); if (typeof applyI18n === 'function') applyI18n(); };
+  // 供 app.js 在追问框切换模型时调用，重新算一遍该露出哪些 Key 输入框
+  window.__refreshBridgeVendorUI = () => { paint(); };
 });
