@@ -480,6 +480,7 @@ const TX_MAP = {
   "新手容易读错的地方": ["Where Beginners Go Wrong", "Gde početnici greše"],
   "替代材料": ["Alternative Materials", "Alternativni materijali"],
   "未能辨认": ["Illegible", "Nečitko"],
+  "图面文字转写": ["Full-Page Text Transcription", "Prepis teksta sa crteža"],
   "标题栏原文": ["Title Block (verbatim)", "Zaglavlje (izvorni tekst)"],
   "检验项目": ["Inspection Items", "Stavke kontrole"],
   "毛坯": ["Blank / Raw Stock", "Sirovac"],

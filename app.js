@@ -2893,6 +2893,8 @@ function showExample() {
   renderReport();
   showPlan(S.report.planText + '\n' + ex.planNote);
   $('#srcBox').innerHTML = EX_SVG;
+  const demoSvg = $('#srcBox svg');
+  if (demoSvg) demoSvg.setAttribute('aria-label', ex.svgLabel || ''); // EX_SVG 里的 aria-label 是写死的中文,按当前语言换掉
   $('#srcBox').style.color = 'var(--ink2)';
   $('#srcKind').textContent = t('src.example');
   $('#srcMeta').innerHTML = ex.srcMeta
