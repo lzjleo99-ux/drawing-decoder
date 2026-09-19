@@ -294,7 +294,10 @@ async function rasterizeSVG(file) {
   }
   if (!w || !h) { w = 1200; h = 900; }
   const maxSide = 2000;
-  const scale = Math.min(1, maxSide / Math.max(w, h)) || 1;
+  // mm/pt 等物理单位标注的 SVG 会被上面的正则当像素读出一个小数字（如 120mm → 120px），
+  // 直接栅格化会得到一张 AI 看不清的小图：只要不超过 maxSide，就放大到至少 target 的一侧
+  const target = 1600;
+  const scale = Math.min(maxSide / Math.max(w, h), Math.max(1, target / Math.max(w, h))) || 1;
   w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
 
   const url = URL.createObjectURL(file);
@@ -364,7 +367,7 @@ async function intakePDF(file) {
     kind: 'image', name: file.name, size: file.size, bitmap: bmp,
     w: bmp.width, h: bmp.height, pages, pageIndex: 0, totalPages: total,
     vector: texts.join('\n').slice(0, 12000),
-    note: 'PDF 第 1 页' + (total > 1 ? '，共 ' + total + ' 页' : ''),
+    note: total > 1 ? tf('note.pdfPage', { i: 1, n: total }) : tf('note.pdfSingle'),
   };
   paintSource();
 }
@@ -413,7 +416,7 @@ async function intakeDXF(file) {
   S.src = {
     kind: 'image', name: file.name, size: file.size, bitmap: bmp, w: cv.width, h: cv.height,
     vector: ctxLines.join('\n').slice(0, 14000),
-    note: 'DXF 矢量重绘 · ' + prims.length + ' 图元 / ' + texts.length + ' 文字',
+    note: tf('note.dxf', { p: prims.length, t: texts.length }),
   };
   paintSource();
 }
@@ -632,7 +635,7 @@ function paintSource() {
       b.onclick = async () => {
         s.pageIndex = i; s.bitmap = await createImageBitmap(cv);
         s.w = cv.width; s.h = cv.height;
-        s.note = 'PDF 第 ' + (i + 1) + ' 页，共 ' + s.totalPages + ' 页';
+        s.note = tf('note.pdfPage', { i: i + 1, n: s.totalPages });
         paintSource();
       };
       wrapEl.appendChild(b);
