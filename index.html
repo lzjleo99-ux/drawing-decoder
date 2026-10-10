@@ -178,12 +178,14 @@ ol.flow li::before{content:counter(f);position:absolute;left:0;top:1px;font-fami
     <p class="authscope" data-i18n="auth.scope"></p>
     <h2 data-i18n="auth.title"></h2>
     <p class="sub" data-i18n="auth.sub"></p>
-    <div class="fld"><label for="authUser" data-i18n="auth.user"></label>
-      <input id="authUser" type="text" autocomplete="username" spellcheck="false"></div>
-    <div class="fld"><label for="authPass" data-i18n="auth.pass"></label>
-      <input id="authPass" type="password" autocomplete="current-password"></div>
-    <button class="btn full" id="authBtn" type="button" data-i18n="auth.enter"></button>
-    <p class="autherr" id="authErr" hidden data-i18n="auth.wrong"></p>
+    <form id="authForm">
+      <div class="fld"><label for="authUser" data-i18n="auth.user"></label>
+        <input id="authUser" type="text" autocomplete="username" spellcheck="false"></div>
+      <div class="fld"><label for="authPass" data-i18n="auth.pass"></label>
+        <input id="authPass" type="password" autocomplete="current-password"></div>
+      <button class="btn full" id="authBtn" type="submit" data-i18n="auth.enter"></button>
+      <p class="autherr" id="authErr" hidden data-i18n="auth.wrong"></p>
+    </form>
     <p class="authnote" data-i18n="auth.note"></p>
     <p class="authcredit"><a href="https://www.uns.ac.rs/index.php/en/faculties/ffaculties/faculty-technical-sciences" target="_blank" rel="noopener" data-i18n="intro.credit"></a></p>
   </div>

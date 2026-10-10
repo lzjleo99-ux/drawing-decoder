@@ -64,7 +64,8 @@
     const errEl = document.getElementById('authErr');
     const list = (typeof ACCOUNTS !== 'undefined' && Array.isArray(ACCOUNTS)) ? ACCOUNTS : [];
 
-    async function tryLogin() {
+    async function tryLogin(ev) {
+      if (ev) ev.preventDefault();
       const u = (userEl.value || '').trim();
       const p = passEl.value || '';
       if (!u || !p) return;
@@ -75,8 +76,20 @@
       if (account) { grant(account); }
       else { errEl.hidden = false; passEl.value = ''; passEl.focus(); }
     }
-    btn.addEventListener('click', tryLogin);
-    [userEl, passEl].forEach(el => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(); }));
+
+    // 走真正的表单提交，而不是按钮 click：
+    // 浏览器的密码管理器把"密码表单被提交"当作保存凭据的触发信号，
+    // 纯 click 处理它收不到，所以以前从来不会提示保存密码。
+    // 登录成功后 grant() 会把整个 #authGate 从 DOM 移除，这正是
+    // 浏览器判定"登录成功"的启发式；密码错时表单留在原地，不会误存。
+    // 回车提交由表单原生处理，不再需要手写 keydown。
+    const form = document.getElementById('authForm');
+    if (form) form.addEventListener('submit', tryLogin);
+    else {
+      // 兜底：万一标记里没有 form，仍保持原来的行为
+      btn.addEventListener('click', tryLogin);
+      [userEl, passEl].forEach(el => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(); }));
+    }
     userEl.focus();
   }
 
