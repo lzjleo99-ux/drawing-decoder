@@ -4,5 +4,5 @@
    替换掉项目目录里的 accounts.js，再跑一次 deploy.command 发布。
    hash = sha256("username:password")。admin:true 的账号能打开账号管理面板和 Key 分享面板。 */
 const ACCOUNTS = [
-  { user: 'admin', hash: '6fd1e4aebb6b1f1937d1ccf90432c394c4fc0dc3d555178041bb34ebf654835e', admin: true, label: 'Admin' },
+  { user: 'admin', hash: '253ad22d8bfc8a338e7d83d9075b13b92a0c7bd3e06ddb5243d7ca0c5fd4fea0', admin: true, label: 'Admin' },
 ];
