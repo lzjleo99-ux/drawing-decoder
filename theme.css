@@ -165,6 +165,11 @@ a{color:var(--accent)}
   background:var(--paper);padding:24px}
 body.mdd-unlocked #appRoot{display:block}
 body.mdd-unlocked #authGate{display:none}
+/* 首帧判定：<head> 里的同步脚本在 body 解析前就把这个类打到 <html> 上，
+   已登录时登录框一帧都不会出现。auth.js 随后照常加 body.mdd-unlocked。
+   不这样做的话，两个页面之间切换每次都会闪一下登录界面。 */
+html.mdd-pre #appRoot{display:block}
+html.mdd-pre #authGate{display:none}
 .authbox{width:100%;max-width:340px;background:var(--sheet);border:1px solid var(--line2);border-radius:3px;
   box-shadow:var(--shadow);padding:26px 24px}
 .authbox h2{font-size:17px;font-weight:700;margin-bottom:5px}

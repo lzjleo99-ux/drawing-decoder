@@ -3,6 +3,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
+<script>/* 首帧防闪：在 body 解析前判定登录态，避免切页面时闪一下登录框 */
+try{var _s=sessionStorage.getItem('mdd.auth.session');
+if(_s&&JSON.parse(_s).realm==='mdd-auth-v1')document.documentElement.classList.add('mdd-pre');}catch(e){}</script>
 <link rel="stylesheet" href="theme.css">
 <style>
 /* 本页专用：图纸解译报告的排版（历史、报告栏、图纸 sheet 内部结构）。

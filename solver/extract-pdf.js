@@ -50,6 +50,17 @@ function itemsToLines(items) {
   }).filter(Boolean);
 }
 
+/**
+ * 量出原卷正文字号（pt）。
+ * pdf.js 的 transform 是 [a,b,c,d,e,f]，竖直缩放量 hypot(c,d) 就是字号（PDF 单位即 pt）。
+ * 同样取众数当正文字号；读不到返回 null。
+ */
+function detectBodyPt(sizeCounts) {
+  if (!sizeCounts.size) return null;
+  const best = [...sizeCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  return Math.round(best * 2) / 2; // 归到 0.5pt
+}
+
 /** 把一页渲染成 PNG Blob，供视觉通道识别公式与图形。 */
 async function renderPageToBlob(page) {
   const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
@@ -80,11 +91,17 @@ export async function extractPdf(buf, log = () => {}) {
 
   const pages = [];
   const images = [];
+  const sizeCounts = new Map();
   const visionPages = Math.min(doc.numPages, PDF_VISION_MAX_PAGES);
 
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const tc = await page.getTextContent();
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim() || !it.transform) continue;
+      const pt = Math.round(Math.hypot(it.transform[2], it.transform[3]) * 2) / 2;
+      if (pt >= 6 && pt <= 36) sizeCounts.set(pt, (sizeCounts.get(pt) || 0) + it.str.length);
+    }
     pages.push(`--- 第 ${i} 页 ---\n${itemsToLines(tc.items).join('\n')}`);
     if (i <= visionPages) {
       log(`正在渲染第 ${i}/${visionPages} 页供识别…`);
@@ -106,5 +123,5 @@ export async function extractPdf(buf, log = () => {}) {
     warnings.push('文档几乎没有文字层（疑似扫描件），将完全依赖视觉识别');
   }
 
-  return { kind: 'pdf', text, pageCount, images, equationCount: 0, warnings };
+  return { kind: 'pdf', bodyPt: detectBodyPt(sizeCounts), text, pageCount, images, equationCount: 0, warnings };
 }

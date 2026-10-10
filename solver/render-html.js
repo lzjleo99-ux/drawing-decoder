@@ -10,6 +10,7 @@
 import { LAYOUT } from './config.js';
 import { latexToMathml, normalizeLatex, splitInlineMath } from './math.js';
 import { sanitizeSvg } from './svg.js';
+import { T } from './ui.js';
 
 function esc(s) {
   return String(s ?? '')
@@ -102,7 +103,7 @@ export function renderAnswerHtml(answerDoc) {
           parts.push(tableHtml(block));
           break;
         case 'answer':
-          parts.push(`<p class="ans-final"><strong>答：</strong>${inlineHtml(block.text || '', stats)}</p>`);
+          parts.push(`<p class="ans-final"><strong>${esc(T('solver.answerWord', '答：'))}</strong>${inlineHtml(block.text || '', stats)}</p>`);
           break;
         default:
           break;

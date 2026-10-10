@@ -33,6 +33,15 @@ function attrNS(el, name) {
   return null;
 }
 
+/** 取指定 localName 的直接子元素（不递归）。 */
+function child(el, localName) {
+  if (!el) return null;
+  for (let n = el.firstChild; n; n = n.nextSibling) {
+    if (n.nodeType === 1 && n.localName === localName) return n;
+  }
+  return null;
+}
+
 function findDescendant(el, localNames) {
   if (!el) return null;
   const want = new Set(localNames);
@@ -64,6 +73,37 @@ async function shrinkIfNeeded(blob) {
   } finally {
     bmp.close?.();
   }
+}
+
+
+/**
+ * 文档默认字号（pt）。Word 的 w:sz 是"半点"，24 = 12pt。
+ */
+function defaultPt(files) {
+  const styles = files['word/styles.xml'];
+  if (!styles) return null;
+  const m = /<w:docDefaults[\s\S]*?<w:sz\s+w:val="(\d+)"/.exec(strFromU8(styles));
+  return m ? Number(m[1]) / 2 : null;
+}
+
+/**
+ * 量出原卷的正文字号（pt）。
+ *
+ * 不能简单统计 w:sz 出现次数：Word 的正文段落通常不写显式字号（继承文档默认），
+ * 写了显式字号的往往恰恰是标题这类少数文本。所以按"字符数"加权，
+ * 并把"没有显式字号"单独算一桶，该桶胜出时用文档默认值。
+ * @param {Map<number|null, number>} charsBySize 半点字号 → 字符数，null 表示继承
+ */
+function detectBodyPt(charsBySize, files) {
+  if (!charsBySize.size) return defaultPt(files);
+  let bestKey = null;
+  let bestChars = -1;
+  for (const [half, chars] of charsBySize) {
+    if (chars > bestChars) { bestChars = chars; bestKey = half; }
+  }
+  if (bestKey === null) return defaultPt(files);
+  const pt = bestKey / 2;
+  return pt >= 6 && pt <= 36 ? pt : defaultPt(files);
 }
 
 /** 解析 document.xml.rels，得到 关系ID → media 文件路径 的映射。 */
@@ -118,6 +158,14 @@ function blockToText(el, ctx) {
     const ln = localName(n);
     if (!ln) continue;
     if (ln === 'r') {
+      // 记录这个 run 的字号与字符数，供 detectBodyPt 做加权统计
+      if (ctx.charsBySize) {
+        const szEl = child(child(n, 'rPr'), 'sz');
+        const half = szEl ? Number(attrNS(szEl, 'val')) : null;
+        const key = Number.isFinite(half) ? half : null;
+        const len = runToText(n).length;
+        if (len) ctx.charsBySize.set(key, (ctx.charsBySize.get(key) || 0) + len);
+      }
       // run 内可能挂着图片
       const drawing = findDescendant(n, ['blip', 'imagedata']);
       if (drawing) {
@@ -148,10 +196,7 @@ function blockToText(el, ctx) {
 
 /** 段落 → 文本，带标题/列表前缀。 */
 function paragraphToText(p, ctx) {
-  const pPr = Array.from({ length: 1 }).map(() => {
-    for (let n = p.firstChild; n; n = n.nextSibling) if (localName(n) === 'pPr') return n;
-    return null;
-  })[0];
+  const pPr = child(p, 'pPr');
 
   let prefix = '';
   if (pPr) {
@@ -209,6 +254,7 @@ export async function extractDocx(buf) {
 
   const ctx = {
     equationCount: 0,
+    charsBySize: new Map(),
     // 图片按首次出现顺序编号，文本里留下 [图N] 标记供模型与图片列表对应
     addImage(rid) {
       if (seen.has(rid)) return ` [图${seen.get(rid)}] `;
@@ -271,6 +317,7 @@ export async function extractDocx(buf) {
 
   return {
     kind: 'docx',
+    bodyPt: detectBodyPt(ctx.charsBySize, files),
     text: chunks.join('\n\n'),
     images: resolved,
     equationCount: ctx.equationCount,

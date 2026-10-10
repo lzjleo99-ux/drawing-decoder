@@ -8,6 +8,78 @@ const LANG_NAMES = { zh: '中文', en: 'English', sr: 'Srpski' };
 const LS_LANG = 'mdd.lang';
 
 const UI = {
+  // ---- 解答页：运行日志（界面语言决定日志语言） ----
+  "slog.sizeDetected": { zh: "原卷正文字号 {pt}pt，答卷将使用同一字号", en: "Source body size {pt}pt — the answer sheet will match", sr: "Veličina teksta originala {pt}pt — rešenje koristi istu" },
+  "slog.extractDocx": { zh: "抽取完成：{chars} 字，{eq} 个 Word 公式，{img} 张图", en: "Extracted: {chars} chars, {eq} Word equations, {img} images", sr: "Izdvojeno: {chars} znakova, {eq} formula, {img} slika" },
+  "slog.extractPdf": { zh: "抽取完成：{pages} 页，{chars} 字，{img} 页送入识别", en: "Extracted: {pages} pages, {chars} chars, {img} pages sent for vision", sr: "Izdvojeno: {pages} strana, {chars} znakova, {img} strana za prepoznavanje" },
+  "slog.splitting": { zh: "正在识别题目结构…", en: "Detecting question structure…", sr: "Prepoznavanje strukture zadataka…" },
+  "slog.splittingImg": { zh: "正在识别题目结构（含 {n} 张图）…", en: "Detecting question structure ({n} images)…", sr: "Prepoznavanje strukture ({n} slika)…" },
+  "slog.splitDone": { zh: "识别到 {n} 道题", en: "Found {n} questions", sr: "Pronađeno {n} zadataka" },
+  "slog.solveStart": { zh: "开始求解（并发 {c}，档位 {tier}）…", en: "Solving (concurrency {c}, effort {tier})…", sr: "Rešavanje (paralelno {c}, nivo {tier})…" },
+  "slog.qDone": { zh: "第 {n} 题完成", en: "Question {n} done", sr: "Zadatak {n} završen" },
+  "slog.qFail": { zh: "第 {n} 题失败：{msg}", en: "Question {n} failed: {msg}", sr: "Zadatak {n} neuspešan: {msg}" },
+  "slog.someFailed": { zh: "{n} 道题求解失败，已在答卷中标出", en: "{n} questions failed; marked in the answer sheet", sr: "{n} zadataka neuspešno; označeno u rešenju" },
+  "slog.layout": { zh: "正在排版…", en: "Laying out…", sr: "Prelom…" },
+  "slog.overflow": { zh: "版面溢出检查：{scaled} 个公式已缩放，{wrapped} 个改为断行", en: "Overflow check: {scaled} equations scaled, {wrapped} wrapped", sr: "Provera preloma: {scaled} formula smanjeno, {wrapped} prelomljeno" },
+  "slog.overflowNone": { zh: "版面溢出检查：全部公式宽度正常", en: "Overflow check: every equation fits", sr: "Provera preloma: sve formule staju" },
+  "slog.mathFail": { zh: "{n} 个公式无法渲染，已保留 LaTeX 源码", en: "{n} equations could not render; LaTeX source kept", sr: "{n} formula nije prikazano; zadržan LaTeX" },
+  "slog.svgRejected": { zh: "{n} 张图形格式不合规，已略过", en: "{n} figures were malformed and skipped", sr: "{n} slika neispravnih, preskočeno" },
+  "slog.done": { zh: "完成，可以导出。", en: "Done — ready to export.", sr: "Gotovo — spremno za izvoz." },
+  "slog.docxOk": { zh: "Word 已生成：{ok} 个原生公式对象", en: "Word generated: {ok} native equation objects", sr: "Word napravljen: {ok} izvornih formula" },
+  "slog.docxKept": { zh: "，{n} 个保留为 LaTeX 源码", en: ", {n} kept as LaTeX source", sr: ", {n} zadržano kao LaTeX" },
+  "slog.docxFail": { zh: "Word 生成失败：{msg}", en: "Word export failed: {msg}", sr: "Izvoz u Word neuspešan: {msg}" },
+  "slog.figuresDropped": { zh: "（存储空间不足，图形未保留）", en: " (storage was full; figures dropped)", sr: " (nedovoljno prostora; slike izostavljene)" },
+  "serr.bridge": { zh: "桥接层未就绪，请刷新页面重试", en: "The API bridge is not ready — reload the page", sr: "Most ka API-ju nije spreman — osvežite stranicu" },
+  "serr.split": { zh: "拆题失败：{msg}", en: "Could not split the paper: {msg}", sr: "Neuspelo deljenje na zadatke: {msg}" },
+  "serr.shape": { zh: "{label}：模型返回的结构不符合约定", en: "{label}: the model returned an unexpected structure", sr: "{label}: model je vratio neočekivanu strukturu" },
+  "serr.noQuestions": { zh: "没有识别出任何题目。请确认上传的是作业或试卷，且不是空白文档。", en: "No questions were found. Check that the file is an assignment or exam and not blank.", sr: "Nijedan zadatak nije pronađen. Proverite da fajl nije prazan." },
+  "serr.badJson": { zh: "模型没有按要求返回 JSON（可换一个模型重试，或把文档拆小）", en: "The model did not return JSON (try another model, or split the document)", sr: "Model nije vratio JSON (probajte drugi model ili podelite dokument)" },
+
+  // ---- 解答页：科目 ----
+  "solver.subj.mech_eng": { zh: "机械工程", en: "Mechanical Engineering", sr: "Mašinstvo" },
+  "solver.subj.metal_forming": { zh: "金属成型原理", en: "Metal Forming", sr: "Obrada deformisanjem" },
+  "solver.subj.theoretical_mech": { zh: "理论力学 / 材料力学", en: "Engineering & Material Mechanics", sr: "Tehnička mehanika i otpornost materijala" },
+  "solver.subj.adv_math": { zh: "高等数学", en: "Advanced Mathematics", sr: "Viša matematika" },
+  "solver.subj.linear_algebra": { zh: "线性代数", en: "Linear Algebra", sr: "Linearna algebra" },
+  "solver.subj.other": { zh: "其他理工科", en: "Other science & engineering", sr: "Ostale tehničke oblasti" },
+
+  "solver.mod.mech_eng": { zh: "齿轮传动、轴承校核、公差配合、机构运动", en: "gear drives, bearing checks, tolerances and fits, mechanism kinematics", sr: "zupčanici, proračun ležajeva, tolerancije i naleganja, kinematika mehanizama" },
+  "solver.mod.metal_forming": { zh: "主应力法、滑移线场、挤压变形抗力、板料冲压", en: "slab method, slip-line fields, extrusion resistance, sheet stamping", sr: "metoda preseka, linije klizanja, otpor ekstruzije, štancovanje lima" },
+  "solver.mod.theoretical_mech": { zh: "静力学平衡、受力图、梁的内力、应力状态分析", en: "statics, free-body diagrams, beam internal forces, stress analysis", sr: "statika, dijagrami slobodnog tela, unutrašnje sile u gredama, analiza napona" },
+  "solver.mod.adv_math": { zh: "微积分、级数、常微分方程、空间解析几何", en: "calculus, series, ordinary differential equations, analytic geometry", sr: "analiza, redovi, diferencijalne jednačine, analitička geometrija" },
+  "solver.mod.linear_algebra": { zh: "矩阵运算、特征值与特征向量、二次型、线性方程组", en: "matrix operations, eigenvalues and eigenvectors, quadratic forms, linear systems", sr: "matrice, sopstvene vrednosti i vektori, kvadratne forme, sistemi jednačina" },
+  "solver.mod.other": { zh: "", en: "", sr: "" },
+
+  "solver.diagYes": { zh: "支持自动作图", en: "diagrams supported", sr: "dijagrami podržani" },
+  "solver.diagNo": { zh: "一般不需作图", en: "diagrams rarely needed", sr: "dijagrami retko potrebni" },
+
+  // ---- 解答页：字体与字号 ----
+  "solver.font.sans": { zh: "黑体 / 微软雅黑（工程文档）", en: "Sans-serif — engineering documents", sr: "Bezserifni — tehnička dokumentacija" },
+  "solver.font.serif": { zh: "宋体 / 仿宋（学术试卷）", en: "Serif — exam papers", sr: "Serifni — ispitni radovi" },
+  "solver.font.mono": { zh: "等宽体（代码与公式）", en: "Monospace — code and formulas", sr: "Monospace — kod i formule" },
+  "solver.size": { zh: "正文字号", en: "Body font size", sr: "Veličina teksta" },
+  "solver.size.auto": { zh: "跟随原卷", en: "Match the source paper", sr: "Prema originalu" },
+  "solver.size.detected": { zh: "原卷字号", en: "source paper", sr: "original" },
+  "solver.size.unknown": { zh: "未能从原卷识别字号，使用 11pt", en: "Could not read a size from the source; using 11pt", sr: "Veličina nije prepoznata; koristi se 11pt" },
+
+  // ---- 解答页：历史记录 ----
+  "solver.hist": { zh: "历史记录", en: "History", sr: "Istorija" },
+  "solver.hist.empty": { zh: "还没有解答记录", en: "No saved answer sheets yet", sr: "Još nema sačuvanih rešenja" },
+  "solver.hist.cap": { zh: "最多保留 100 条", en: "Keeps the latest 100", sr: "Čuva poslednjih 100" },
+  "solver.hist.clear": { zh: "清空", en: "Clear all", sr: "Obriši sve" },
+  "solver.hist.del": { zh: "删除", en: "Delete", sr: "Obriši" },
+  "solver.hist.saved": { zh: "已存入历史记录", en: "Saved to history", sr: "Sačuvano u istoriji" },
+  "solver.hist.restored": { zh: "已从历史记录载入", en: "Loaded from history", sr: "Učitano iz istorije" },
+  "solver.hist.confirmClear": { zh: "确定清空全部解答历史？此操作不可撤销。", en: "Clear the entire answer history? This cannot be undone.", sr: "Obrisati celu istoriju rešenja? Ovo se ne može poništiti." },
+  "solver.hist.questions": { zh: "题", en: "questions", sr: "zadataka" },
+  "solver.hist.question1": { zh: "题", en: "question", sr: "zadatak" },
+  "solver.hist.question24": { zh: "题", en: "questions", sr: "zadatka" },
+
+  // ---- 解答语言：答卷跟随界面语言 ----
+  "solver.ansLang": { zh: "用简体中文作答，所有解释性文字、标题和答案都用中文。", en: "Write the entire answer in English — all explanations, titles and final answers in English.", sr: "Napiši ceo odgovor na srpskom jeziku — sva objašnjenja, naslovi i konačni odgovori na srpskom." },
+  "solver.docTitleFallback": { zh: "作业解答", en: "Answer Sheet", sr: "Rešenje zadataka" },
+  "solver.answerWord": { zh: "答：", en: "Answer: ", sr: "Odgovor: " },
+
   // ---- 站内导航 ----
   "nav.decoder": { zh: "图纸解译台", en: "Drawing Decoder", sr: "Čitač crteža" },
   "nav.solver": { zh: "作业解答", en: "Homework Solver", sr: "Rešavač zadataka" },

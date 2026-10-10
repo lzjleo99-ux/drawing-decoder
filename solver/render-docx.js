@@ -8,6 +8,7 @@ import * as docx from 'https://cdn.jsdelivr.net/npm/docx@9.9.0/+esm';
 import { FONTS, LAYOUT, DEFAULT_FONT } from './config.js';
 import { latexToOmml, normalizeLatex, splitInlineMath } from './math.js';
 import { sanitizeSvg } from './svg.js';
+import { T } from './ui.js';
 
 const {
   Document, Packer, Paragraph, TextRun, AlignmentType, ImportedXmlComponent,
@@ -105,7 +106,7 @@ async function svgToPng(svg, maxWidthPx) {
   }
 }
 
-async function figureParagraphs(block, stats) {
+async function figureParagraphs(block, stats, SZ_SMALL) {
   const { svg, removed } = sanitizeSvg(block.svg);
   if (!svg) { stats.svgRejected++; return []; }
   if (removed.length) stats.svgStripped.push(...removed);
@@ -121,7 +122,7 @@ async function figureParagraphs(block, stats) {
       paras.push(new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { after: 160, line: LINE },
-        children: [new TextRun({ text: block.caption, size: 18, color: '595959' })],
+        children: [new TextRun({ text: block.caption, size: SZ_SMALL, color: '595959' })],
       }));
     }
     return paras;
@@ -161,17 +162,27 @@ export async function renderDocx(answerDoc) {
   const stats = { ommlOk: 0, ommlFail: 0, failedLatex: [], figures: 0, figureFail: 0,
     svgStripped: [], svgRejected: 0, warnings: [] };
 
+  // 字号跟随原卷。Word 用半点，标题与图题按正文的比例放缩，
+  // 这样换字号时版面比例不变。
+  const bodyPt = Number(answerDoc.meta?.bodyPt) || LAYOUT.bodyPt;
+  const half = (pt) => Math.max(2, Math.round(pt * 2));
+  const SZ_BODY = half(bodyPt);
+  const SZ_TITLE = half(bodyPt * 1.45);
+  const SZ_HEAD = half(bodyPt * 1.12);
+  const SZ_SMALL = half(bodyPt * 0.82);
+
+  const answerWord = T('solver.answerWord', '答：');
   const children = [];
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 120, line: LINE },
-    children: [new TextRun({ text: answerDoc.meta?.title || '作业解答', bold: true, size: 32 })],
+    children: [new TextRun({ text: answerDoc.meta?.title || '作业解答', bold: true, size: SZ_TITLE })],
   }));
   if (answerDoc.meta?.subtitle) {
     children.push(new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 320, line: LINE },
-      children: [new TextRun({ text: answerDoc.meta.subtitle, size: 20, color: '595959' })],
+      children: [new TextRun({ text: answerDoc.meta.subtitle, size: SZ_SMALL, color: '595959' })],
     }));
   }
 
@@ -180,7 +191,7 @@ export async function renderDocx(answerDoc) {
     if (heading) {
       children.push(new Paragraph({
         spacing: { before: 280, after: 120, line: LINE },
-        children: [new TextRun({ text: heading, bold: true, size: 24 })],
+        children: [new TextRun({ text: heading, bold: true, size: SZ_HEAD })],
       }));
     }
     if (q.statement) {
@@ -204,7 +215,7 @@ export async function renderDocx(answerDoc) {
           break;
         }
         case 'figure':
-          children.push(...(await figureParagraphs(block, stats)));
+          children.push(...(await figureParagraphs(block, stats, SZ_SMALL)));
           break;
         case 'table': {
           const t = tableBlock(block);
@@ -215,7 +226,7 @@ export async function renderDocx(answerDoc) {
           children.push(new Paragraph({
             spacing: { before: 160, after: 200, line: LINE },
             shading: { type: ShadingType.CLEAR, fill: 'F8FAFC' },
-            children: [new TextRun({ text: '答：', bold: true }), ...inlineChildren(block.text || '', stats)],
+            children: [new TextRun({ text: answerWord, bold: true }), ...inlineChildren(block.text || '', stats)],
           }));
           break;
         default:
@@ -230,7 +241,7 @@ export async function renderDocx(answerDoc) {
     styles: {
       default: {
         document: {
-          run: { font: { ascii: font.ascii, eastAsia: font.eastAsia, hAnsi: font.ascii, cs: font.ascii }, size: LAYOUT.bodyPt * 2 },
+          run: { font: { ascii: font.ascii, eastAsia: font.eastAsia, hAnsi: font.ascii, cs: font.ascii }, size: SZ_BODY },
           paragraph: { spacing: { line: LINE, lineRule: 'auto' } },
         },
       },
