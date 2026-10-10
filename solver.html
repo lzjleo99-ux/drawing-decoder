@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<title data-i18n="solver.pageTitle">作业解答 · 机械工程学习网页</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 46 22'%3E%3Cg fill='none' stroke='%2314607F' stroke-width='2'%3E%3Cpath d='M2.5 4 L14 7.4 L14 14.6 L2.5 18 Z'/%3E%3Ccircle cx='33' cy='11' r='8.6'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/temml@0.14.0/dist/Temml-Local.css">
+<style>
+/* 本页专用：答卷纸张与打印。通用样式见 theme.css。 */
+.fieldrow{margin-bottom:13px}
+.fieldrow label{display:block;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
+.fieldrow select{width:100%;font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);
+  border-radius:2px;background:var(--sheet2);color:var(--ink)}
+.fieldrow select:focus{border-color:var(--accent);outline:none}
+.hint{font-size:11px;color:var(--ink3);margin-top:5px;line-height:1.5}
+.check{display:flex;gap:9px;align-items:flex-start;padding:7px 0}
+.check input{margin-top:3px;flex:none;accent-color:var(--accent)}
+.check label{font-size:12.5px;color:var(--ink2);line-height:1.5}
+.filechip{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:11px;
+  padding:7px 10px;background:var(--accent-wash);border:1px solid var(--accent);border-radius:2px;font-size:12.5px}
+.filechip span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent-ink)}
+.filechip button{flex:none;background:none;border:0;cursor:pointer;color:var(--accent-ink);
+  font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.errbox{margin-top:11px;padding:8px 10px;border:1px solid var(--crit);background:var(--crit-wash);
+  color:var(--crit);font-size:12.5px;border-radius:2px}
+.ansTabs{display:flex;gap:6px}
+.ansTabs button{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  padding:4px 10px;border:1px solid var(--line);background:var(--sheet);color:var(--ink3);cursor:pointer;border-radius:2px}
+.ansTabs button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.logview{background:var(--sink);border:1px solid var(--line);border-radius:2px;padding:12px;
+  font-family:var(--f-mono);font-size:11px;line-height:1.75;max-height:60vh;overflow:auto;color:var(--ink2)}
+.logview p{margin:0;white-space:pre-wrap;word-break:break-word}
+.logview .ok{color:var(--ok)} .logview .warn{color:var(--warn)} .logview .error{color:var(--crit)}
+.ansDl{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:13px;border-top:1px dashed var(--line)}
+.ansStat{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;color:var(--ink3);flex:1;min-width:180px}
+
+/* 答卷纸张：屏幕上按 A4 实宽渲染，再整体缩放到面板宽度，所见即打印所得 */
+.sheetScroll{overflow:auto;background:var(--sink);padding:14px;border:1px solid var(--line);border-radius:2px;max-height:68vh}
+.sheetScale{transform-origin:top left}
+.ans-sheet{width:210mm;min-height:297mm;padding:25.4mm;background:#fff;color:#111;box-shadow:var(--shadow);
+  font-size:11pt;line-height:1.25;box-sizing:border-box}
+.ans-sheet.f-sans{font-family:'PingFang SC','Microsoft YaHei','Noto Sans CJK SC','Noto Sans SC',sans-serif}
+.ans-sheet.f-serif{font-family:'Songti SC','SimSun','Noto Serif CJK SC','Noto Serif SC',serif}
+.ans-sheet.f-mono{font-family:'IBM Plex Mono','JetBrains Mono',Menlo,Consolas,monospace}
+.ans-title{text-align:center;margin-bottom:1.6em}
+.ans-title h1{font-size:1.5em;margin:0 0 .3em;font-family:inherit;color:#111}
+.ans-sub{color:#666;font-size:.85em;margin:0}
+.ans-q{margin-bottom:1.4em}
+.ans-q h2{font-size:1.12em;margin:1.4em 0 .6em;font-family:inherit;color:#111}
+.ans-sheet p{margin:0 0 .6em;text-align:justify}
+.ans-stmt{color:#333}
+.ans-final{background:#f6f8f9;border-left:3px solid #14607F;padding:.5em .8em}
+.ans-sheet .eq{margin:.8em 0;overflow:hidden}
+.ans-sheet .eq-inner{display:inline-block;white-space:nowrap}
+.ans-sheet .eq-overflow{overflow-x:auto}
+.ans-sheet .eq-overflow .eq-inner{white-space:normal}
+.ans-sheet math{font-size:1.05em}
+.eq-fail{font-family:var(--f-mono);font-size:.85em;color:#8A6512;background:#F2E8D2;
+  border:1px solid #d9c38a;border-radius:2px;padding:0 .3em}
+.ans-sheet figure{margin:1em 0;text-align:center}
+.ans-sheet figure svg{max-width:100%;height:auto}
+.ans-sheet figcaption{font-size:.82em;color:#666;margin-top:.4em}
+.ans-sheet table{border-collapse:collapse;width:100%;margin:.8em 0;font-size:.92em}
+.ans-sheet table{color:#111}  /* 显式指定：怪异模式下表格不继承祖先 color */
+.ans-sheet th,.ans-sheet td{border:1px solid #bbb;padding:.35em .6em;text-align:left;color:#111}
+.ans-sheet th{background:#f1f4f5}
+
+/* 打印：只留答卷本身，页边距交给 @page（与 Word 导出同一组参数） */
+@media print{
+  @page{size:A4;margin:25.4mm}
+  html,body{background:#fff}
+  #authGate,.topbar,.keybar,.intro,.col-l,.ansTabs,.ansDl,.panel-h,.logview{display:none!important}
+  .wrap{display:block!important;padding:0!important;max-width:none!important;gap:0!important}
+  .col-r .panel{border:0!important;box-shadow:none!important;background:#fff!important;padding:0!important}
+  .sheetScroll{overflow:visible!important;background:#fff!important;border:0!important;padding:0!important;max-height:none!important}
+  .sheetScale{transform:none!important;width:auto!important;height:auto!important}
+  .ans-sheet{width:auto!important;min-height:0!important;padding:0!important;box-shadow:none!important}
+  .ans-q{break-inside:auto}
+  .ans-q h2{break-after:avoid}
+  .ans-sheet .eq,.ans-sheet figure,.ans-sheet table{break-inside:avoid}
+}
+</style>
+
+<div id="authGate">
+  <div class="authbox">
+    <div class="authlogos">
+      <img src="assets/ftn-logo-small.png" alt="Faculty of Technical Sciences, Novi Sad">
+      <img src="assets/uns-logo-small.png" alt="University of Novi Sad">
+    </div>
+    <p class="authscope" data-i18n="auth.scope"></p>
+    <h2 data-i18n="auth.title"></h2>
+    <p class="sub" data-i18n="auth.sub"></p>
+    <div class="fld"><label for="authUser" data-i18n="auth.user"></label>
+      <input id="authUser" type="text" autocomplete="username" spellcheck="false"></div>
+    <div class="fld"><label for="authPass" data-i18n="auth.pass"></label>
+      <input id="authPass" type="password" autocomplete="current-password"></div>
+    <button class="btn full" id="authBtn" type="button" data-i18n="auth.enter"></button>
+    <p class="autherr" id="authErr" hidden data-i18n="auth.wrong"></p>
+    <p class="authnote" data-i18n="auth.note"></p>
+    <p class="authcredit"><a href="https://www.uns.ac.rs/index.php/en/faculties/ffaculties/faculty-technical-sciences" target="_blank" rel="noopener" data-i18n="intro.credit"></a></p>
+  </div>
+</div>
+
+<div id="appRoot">
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 46 22" width="46" height="22" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <path d="M2.5 4 L14 7.4 L14 14.6 L2.5 18 Z"/>
+        <circle cx="33" cy="11" r="8.6"/><circle cx="33" cy="11" r="4"/>
+        <path d="M0 11 H46" stroke-width=".7" stroke-dasharray="6 2 1.5 2"/>
+      </g>
+    </svg>
+    <div>
+      <h1 data-i18n="brand.name">机械图纸解译台</h1>
+      <p class="tag">Homework Solver</p>
+    </div>
+  </div>
+  <nav class="sitenav">
+    <a href="index.html" data-i18n="nav.decoder"></a>
+    <a href="solver.html" aria-current="page" data-i18n="nav.solver"></a>
+  </nav>
+  <div class="top-actions">
+    <select class="langsel" id="langSel" aria-label="Language"></select>
+    <span class="cap" id="capState"><i></i><span data-i18n="cap.connecting"></span></span>
+    <button class="btn ghost sm" id="logoutBtn" type="button" data-i18n="auth.logout"></button>
+  </div>
+</header>
+
+<div class="keybar">
+  <div class="field" id="apiKeyField">
+    <label for="apiKey">Anthropic Key</label>
+    <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="field" id="dsApiKeyField" hidden>
+    <label for="dsApiKey">DeepSeek Key</label>
+    <input id="dsApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="field" id="zpApiKeyField" hidden>
+    <label for="zpApiKey">Zhipu Key</label>
+    <input id="zpApiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="field" id="apexApiKeyField" hidden>
+    <label for="apexApiKey">Apex Key</label>
+    <input id="apexApiKey" type="password" placeholder="..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="field narrow">
+    <input id="wsId" type="text" data-i18n-ph="bridge.wsPlaceholder" placeholder="Workspace ID (org-level keys only, wrkspc_...)" autocomplete="off" spellcheck="false">
+  </div>
+  <select id="modelSel" data-i18n-aria="bridge.modelAria" aria-label="Model"></select>
+  <button id="testBtn" type="button" data-i18n="bridge.testBtn">Test connection</button>
+  <button id="syncBtn" type="button" data-i18n="bridge.syncBtn">Sync to live site</button>
+  <span class="keystate" id="keyState"></span>
+</div>
+
+<div class="intro">
+  <p data-i18n="solver.intro"></p>
+</div>
+
+<main class="wrap">
+  <aside class="col-l">
+
+    <section class="panel">
+      <div class="panel-h"><h2 data-i18n="solver.panel.setup"></h2></div>
+      <div class="panel-b">
+        <div class="fieldrow">
+          <label for="subjectSel" data-i18n="solver.subject"></label>
+          <select id="subjectSel"></select>
+          <p class="hint" id="subjectHint"></p>
+        </div>
+        <div class="fieldrow">
+          <label for="fontSel" data-i18n="solver.font"></label>
+          <select id="fontSel"></select>
+        </div>
+        <div class="fieldrow">
+          <label for="tierSel" data-i18n="solver.tier"></label>
+          <select id="tierSel"></select>
+        </div>
+        <div class="fieldrow" style="margin-bottom:0">
+          <label data-i18n="solver.options"></label>
+          <div class="check">
+            <input type="checkbox" id="autoLayout" checked>
+            <label for="autoLayout" data-i18n="solver.autoLayout"></label>
+          </div>
+          <div class="check">
+            <input type="checkbox" id="autoDraw" checked>
+            <label for="autoDraw" data-i18n="solver.autoDraw"></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-h"><h2 data-i18n="solver.panel.upload"></h2></div>
+      <div class="panel-b">
+        <div class="drop" id="drop" tabindex="0" role="button" data-i18n-aria="solver.dropAria" aria-label="">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6"/><path d="M8 13h8M8 17h5" stroke-linecap="round"/>
+          </svg>
+          <div class="drop-t" data-i18n="solver.drop"></div>
+          <div class="drop-s" data-i18n="solver.limits"></div>
+          <input id="fileInput" type="file" accept=".docx,.pdf" hidden>
+        </div>
+        <div class="filechip" id="fileChip" hidden>
+          <span id="fileName"></span>
+          <button type="button" id="clearFile" data-i18n="solver.remove"></button>
+        </div>
+        <div class="errbox" id="formErr" hidden></div>
+        <button class="btn full" id="runBtn" type="button" disabled data-i18n="solver.run" style="margin-top:13px"></button>
+      </div>
+    </section>
+
+  </aside>
+
+  <section class="col-r">
+    <section class="panel">
+      <div class="panel-h">
+        <h2 data-i18n="solver.result"></h2>
+        <div class="ansTabs">
+          <button type="button" id="tabPreview" aria-pressed="true" data-i18n="solver.tab.preview"></button>
+          <button type="button" id="tabLog" aria-pressed="false" data-i18n="solver.tab.log"></button>
+        </div>
+      </div>
+      <div class="panel-b">
+        <div id="emptyHint" class="empty" data-i18n="solver.empty"></div>
+
+        <div id="previewWrap" hidden>
+          <div class="sheetScroll" id="sheetScroll">
+            <div class="sheetScale" id="sheetScale">
+              <article class="ans-sheet f-sans" id="ansSheet"></article>
+            </div>
+          </div>
+        </div>
+
+        <div class="logview" id="logView" hidden></div>
+
+        <div class="ansDl" id="ansDl" hidden>
+          <span class="ansStat" id="ansStat"></span>
+          <button class="btn" type="button" id="dlDocx" data-i18n="solver.dl.docx"></button>
+          <button class="btn ghost" type="button" id="dlPdf" data-i18n="solver.dl.pdf"></button>
+        </div>
+        <p class="hint" id="pdfHint" hidden data-i18n="solver.pdfHint"></p>
+      </div>
+    </section>
+  </section>
+</main>
+
+</div>
+
+<script src="i18n.js"></script>
+<script src="accounts.js"></script>
+<script src="auth.js"></script>
+<script src="local-bridge.js"></script>
+<script type="module" src="solver/main.js"></script>
