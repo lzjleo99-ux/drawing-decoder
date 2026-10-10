@@ -361,7 +361,7 @@ async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) 
   }
 
   const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = '', text = '', truncated = false;
+  let buf = '', text = '', reasoning = '', truncated = false;
   for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -375,6 +375,8 @@ async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) 
         if (!raw || raw === '[DONE]') continue;
         let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
         const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
+        // 思考型模型的推理走单独字段，不计入正文：Apex 用 reasoning，DeepSeek 系用 reasoning_content
+        if (d && (d.reasoning || d.reasoning_content)) reasoning += (d.reasoning || d.reasoning_content);
         if (d && d.content) {
           text += d.content;
           if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) { } }
@@ -383,7 +385,16 @@ async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) 
       }
     }
   }
-  if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
+  if (!text.trim()) {
+    // 推理同样消耗 max_tokens。Apex 的 Qwen3.6-35B-A3B 实测会在一道简单算术题上
+    // 写一万多字推理把预算耗尽，一个字正文都不产出 —— 此时只说"没有返回内容"
+    // 会让人以为是 Key 或网络的问题，得说清楚到底发生了什么、该怎么办。
+    const budget = opts.maxPower ? 32000 : 8192;
+    const why = truncated && reasoning
+      ? '：模型把 ' + budget + ' 的输出预算全部用在了推理上，没来得及给出答案。请换一个推理更短的模型（Apex 建议用 Qwen3.8-27B），或把题目拆小一些。'
+      : (reasoning ? '：模型只输出了推理过程，没有给出正文。' : '');
+    throw { code: 'empty_completion', message: '模型没有返回内容' + why };
+  }
   return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
 }
 
