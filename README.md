@@ -54,6 +54,8 @@ solver/           作业解答的逻辑
   prompts.js        提示词
   solve.js          两阶段求解（先拆题，再逐题并发）
   main.js           页面交互
+test/             浏览器回归测试（见「测试」）
+legacy/           已退役的 Node 服务端版本存档（见 legacy/README.md）
 ```
 
 样式只属于某一个页面时，留在该页面自己的 `<style>` 里；两个页面都用的放 `theme.css`。
@@ -65,7 +67,30 @@ solver/           作业解答的逻辑
 
 ```bash
 npx serve .        # 或任何会正确设置 charset 的静态服务器
+node test/serve.mjs   # 本仓库自带的最小静态服务器，同样会带上 charset=utf-8
 ```
+
+## 测试
+
+```bash
+node test/run.mjs
+```
+
+79 项回归测试，覆盖公式 OMML↔LaTeX 回环、`$` 切分、SVG 白名单清洗、配置表、
+docx/pdf 抽取、HTML 与 DOCX 渲染、公式溢出实测，以及两阶段求解链路
+（把 `window.claude` 换成 stub，不花 API 费用）。
+
+测试跑在**真实浏览器**里（无头 Chrome + DevTools 协议），不是在 Node 里跑：
+`solver/` 的模块从 CDN 以 `https://` URL import，Node 的 ESM 加载器不支持这种说明符；
+公式溢出要真实布局引擎才量得出 `scrollWidth`；PDF 抽取要 canvas 栅格化页面。
+在 Node 里硬跑只能把被测对象换成替身，那测的就不是真正发布出去的那份代码了。
+需要本机有 Chrome / Chromium / Edge / Brave 之一，或用 `CHROME_PATH` 指定。
+
+## 历史版本
+
+`legacy/zhijie-solver-node-server/` 保留着并入本站之前的 Node 服务端实现
+（Express + 无头 Chrome 出 PDF + 服务端持有 Key）。它已整体退役，本站任何页面都不引用它，
+保留只为可追溯 —— 细节和差异对照见 [legacy/README.md](legacy/README.md)。
 
 ## 已知限制
 

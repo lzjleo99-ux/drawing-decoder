@@ -1,0 +1,9 @@
+# 本站是静态站，本体不产生依赖；下面几项是为 legacy/ 里保留的旧 Node 服务端版本
+# 预留的 —— 若在本地试跑那个版本，这些忽略项依然适用。
+
+node_modules/
+.env
+test/ui-*.png
+test/out.*
+*.log
+.DS_Store

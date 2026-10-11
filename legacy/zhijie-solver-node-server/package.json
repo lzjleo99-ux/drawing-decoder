@@ -1,0 +1,27 @@
+{
+  "name": "zhijie-solver",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "工科与理科作业/试卷智能解答系统 — 解析 .docx/.pdf，调用 Claude 求解，输出版式一致的 .docx/.pdf 答卷",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/run.js",
+    "fixtures": "node test/make-fixtures.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@xmldom/xmldom": "^0.9.8",
+    "docx": "^9.9.0",
+    "express": "^5.3.0",
+    "fflate": "^0.8.2",
+    "mathml2omml": "^0.5.0",
+    "multer": "^2.4.0",
+    "pdfjs-dist": "^6.4.299",
+    "puppeteer-core": "^25.13.0",
+    "sharp": "^0.35.5",
+    "temml": "^0.14.0",
+    "zod": "^3.25.76"
+  }
+}

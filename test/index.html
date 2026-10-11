@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>作业解答 · 模块测试</title>
+<style>
+  body { font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; background: #14161a; color: #dfe3ea; margin: 0; padding: 16px; }
+  #out { white-space: pre-wrap; margin: 0; }
+  #stage { position: absolute; left: -10000px; top: 0; width: 640px; }
+</style>
+</head>
+<body>
+<pre id="out">running…</pre>
+<!-- 溢出测量的挂载点：必须真实参与布局才有 clientWidth / scrollWidth 可量 -->
+<div id="stage"></div>
+<script type="module" src="./tests.mjs"></script>
+</body>
+</html>

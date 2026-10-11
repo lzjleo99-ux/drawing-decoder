@@ -1,0 +1,26 @@
+{
+  "name": "智解工科与理科试卷/作业系统",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-24-bookworm",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "智解系统",
+      "onAutoForward": "openPreview"
+    }
+  },
+  "containerEnv": {
+    "CHROME_PATH": "/usr/bin/chromium"
+  },
+  "secrets": {
+    "ANTHROPIC_API_KEY": {
+      "description": "Claude API 密钥。不填也能启动，但只能用空跑模式（SOLVER_DRY_RUN=1）验证链路，无法真正解题。",
+      "documentationUrl": "https://console.anthropic.com/settings/keys"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["anthropic.claude-code"]
+    }
+  }
+}

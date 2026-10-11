@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能工程与理科作业/试卷解析系统</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%93%90%3C/text%3E%3C/svg%3E">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
+    .font-sans-sc { font-family: 'Noto Sans SC', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    /* 预览用 iframe 承载与 PDF 完全相同的 HTML，再整体缩放到面板宽度 */
+    #previewFrame { width: 794px; border: 0; display: block; transform-origin: top left; }
+    #previewWrap { overflow: hidden; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans-sc min-h-screen flex flex-col">
+
+  <header class="bg-indigo-700 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+      <div class="flex items-center space-x-3">
+        <svg class="w-8 h-8 text-indigo-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+        </svg>
+        <h1 class="text-xl font-bold tracking-wide">智解工科与理科试卷/作业系统</h1>
+      </div>
+      <span id="modelBadge" class="text-xs bg-indigo-600 px-3 py-1 rounded-full text-indigo-100 border border-indigo-500">加载中…</span>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8 flex-grow grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+
+    <div class="lg:col-span-1 space-y-6">
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-5">
+        <h2 class="text-lg font-bold text-slate-900 border-b pb-3 flex items-center justify-between">
+          <span>解析参数设置</span>
+          <span class="text-xs text-indigo-600 font-normal">智能排版 &amp; 绘图</span>
+        </h2>
+
+        <div>
+          <label for="subjectSelect" class="block text-sm font-medium text-slate-700 mb-1">选择科目</label>
+          <select id="subjectSelect" class="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select>
+          <p id="subjectHint" class="text-xs text-slate-400 mt-1"></p>
+        </div>
+
+        <div>
+          <label for="fontSelect" class="block text-sm font-medium text-slate-700 mb-1">输出字体样式（Word 与 PDF 共用）</label>
+          <select id="fontSelect" class="w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select>
+        </div>
+
+        <div class="space-y-2 pt-2">
+          <label class="block text-sm font-medium text-slate-700">排版与图解配置</label>
+          <div class="flex items-center">
+            <input id="autoLayout" type="checkbox" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded">
+            <label for="autoLayout" class="ml-2 text-sm text-slate-600">公式溢出自动缩放与断行</label>
+          </div>
+          <div class="flex items-center">
+            <input id="autoDraw" type="checkbox" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded">
+            <label for="autoDraw" class="ml-2 text-sm text-slate-600">受力图 / 几何辅助图自动生成</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h3 class="text-md font-bold text-slate-900">上传待解答文件</h3>
+
+        <div id="dropZone" role="button" tabindex="0" class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-indigo-500 transition cursor-pointer bg-slate-50">
+          <svg class="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p class="mt-2 text-sm text-slate-600">点击上传或将 Word / PDF 文件拖拽至此</p>
+          <p id="limitHint" class="text-xs text-slate-400 mt-1"></p>
+          <input id="fileInput" type="file" class="hidden" accept=".docx,.pdf">
+        </div>
+
+        <div id="fileInfo" class="hidden text-sm bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg flex justify-between items-center">
+          <span id="fileName" class="truncate font-medium"></span>
+          <button type="button" id="clearFileBtn" class="text-indigo-400 hover:text-indigo-600 text-xs font-bold ml-2 shrink-0">删除</button>
+        </div>
+
+        <div id="formError" class="hidden text-sm bg-rose-50 text-rose-700 border border-rose-200 px-3 py-2 rounded-lg"></div>
+
+        <button type="button" id="submitBtn" disabled class="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium shadow hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+          立即一键求解并生成文档
+        </button>
+      </div>
+    </div>
+
+    <div class="lg:col-span-2 flex flex-col space-y-6">
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex-grow flex flex-col">
+        <div class="flex justify-between items-center border-b pb-4 mb-4">
+          <h3 class="font-bold text-slate-900 text-lg">答卷预览与重排结果</h3>
+          <div class="flex space-x-2">
+            <button type="button" id="tabPreview" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-100 text-indigo-700 transition">预览效果</button>
+            <button type="button" id="tabLog" class="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition">求解日志</button>
+          </div>
+        </div>
+
+        <div id="panelPreview" class="flex-grow bg-slate-100 rounded-lg p-6 border border-slate-200 overflow-y-auto max-h-[560px]">
+          <div id="previewPlaceholder" class="text-center text-slate-400 py-16 text-sm">
+            请在左侧选择科目并上传作业/试卷文件，点击“立即一键求解”。<br>
+            预览区显示的就是导出 PDF 的同一份排版结果。
+          </div>
+          <div id="previewWrap" class="hidden bg-white shadow-sm mx-auto">
+            <iframe id="previewFrame" title="答卷预览" sandbox="allow-scripts allow-same-origin"></iframe>
+          </div>
+        </div>
+
+        <div id="panelLog" class="hidden flex-grow bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg p-4 overflow-y-auto max-h-[560px]">
+          <p class="text-slate-500">// 系统待命，等待任务输入…</p>
+        </div>
+
+        <div id="statusArea" class="hidden mt-6 pt-4 border-t flex flex-wrap gap-4 items-center justify-between">
+          <div id="statusText" class="text-xs text-slate-500"></div>
+          <div class="flex space-x-3">
+            <button type="button" id="dlDocx" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow flex items-center space-x-2 transition disabled:opacity-40" disabled>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <span>下载 Word 答卷 (.docx)</span>
+            </button>
+            <button type="button" id="dlPdf" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow flex items-center space-x-2 transition disabled:opacity-40" disabled>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <span>下载 PDF 答卷 (.pdf)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+    智能文档排版引擎 | Word 公式以 OMML 原生对象导出，可在 Word 中直接编辑
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

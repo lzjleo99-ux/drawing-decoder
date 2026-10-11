@@ -1,0 +1,6 @@
+node_modules/
+.env
+test/ui-*.png
+test/out.*
+*.log
+.DS_Store
