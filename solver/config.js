@@ -9,6 +9,7 @@ export const SUBJECTS = {
   theoretical_mech: { i18n: 'solver.subj.theoretical_mech', mod: 'solver.mod.theoretical_mech', en: 'Engineering & Material Mechanics', diagrams: true },
   adv_math: { i18n: 'solver.subj.adv_math', mod: 'solver.mod.adv_math', en: 'Advanced Mathematics', diagrams: false },
   linear_algebra: { i18n: 'solver.subj.linear_algebra', mod: 'solver.mod.linear_algebra', en: 'Linear Algebra', diagrams: false },
+  statistics: { i18n: 'solver.subj.statistics', mod: 'solver.mod.statistics', en: 'Probability & Statistics', diagrams: true },
   other: { i18n: 'solver.subj.other', mod: 'solver.mod.other', en: 'Other science & engineering', diagrams: true },
 };
 
@@ -55,3 +56,5 @@ export const BODY_SIZES = ['auto', 10.5, 11, 12, 14];
 export const PDF_VISION_MAX_PAGES = 10;
 // 页面栅格化倍率：1.5 倍下 A4 约 892×1262 像素，公式细节足够且不浪费 token
 export const PDF_RENDER_SCALE = 1.5;
+// 含图形的页用更高倍率：受力图、坐标系上的小字号标注在 1.5 倍下常常糊成一团
+export const PDF_FIGURE_SCALE = 2.2;

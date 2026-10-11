@@ -1,0 +1,347 @@
+// 各科目的解法库。
+//
+// 为什么要有这个文件：把一道题整个丢给模型，它得先自己想"这是什么题、该用哪套方法"，
+// 思考型模型在这一步会烧掉大量推理 token（实测 Qwen3.6 能在一道算术题上写一万多字推理）。
+// 先按题型匹配到标准解法，把核心公式和步骤直接给它，它就只需要代数值和算，
+// 推理量显著下降，答案也更贴合教材的标准解法而不是模型自创的路子。
+//
+// 每张卡片：
+//   id       题型标识，拆题阶段由模型回填，模型不填时用 kw 关键词兜底匹配
+//   label    题型名（英文，提示词本身就是英文）
+//   kw       识别关键词，中/英/塞三语混列，命中即可
+//   formulas 核心公式（LaTeX，语言无关）
+//   steps    标准解题步骤
+//
+// 卡片只进提示词、不进界面，所以不需要做 i18n；答卷语言由输出语言指令统一控制。
+
+export const METHODS = {
+  mech_eng: [
+    { id: 'gear_force', label: 'Gear tooth forces',
+      kw: ['齿轮', '分度圆', '模数', '压力角', '切向力', '径向力', 'gear', 'pitch circle', 'module', 'pressure angle', 'tangential', 'zupčanik'],
+      formulas: ['T = 9.55 \\times 10^6 \\frac{P}{n}', 'F_t = \\frac{2T}{d}', 'F_r = F_t \\tan\\alpha', 'F_a = F_t \\tan\\beta', 'd = m z'],
+      steps: ['Convert power and speed to torque T (watch the unit: N·mm with the 9.55e6 form).',
+        'Get the pitch diameter from module and tooth count if not given.',
+        'Tangential force from torque and pitch diameter.',
+        'Radial force from the pressure angle; axial force only for helical/bevel gears.',
+        'State all three components with units and note the direction convention.'] },
+    { id: 'gear_strength', label: 'Gear contact / bending strength check',
+      kw: ['接触强度', '弯曲强度', '齿根', '校核', '许用应力', 'contact stress', 'bending strength', 'allowable stress'],
+      formulas: ['\\sigma_H = Z_E Z_H \\sqrt{\\frac{2KT_1}{bd_1^2}\\cdot\\frac{u+1}{u}} \\le [\\sigma_H]',
+        '\\sigma_F = \\frac{2KT_1}{bm d_1} Y_{Fa} Y_{Sa} \\le [\\sigma_F]'],
+      steps: ['Collect the load factor K, face width b, and the gear ratio u.',
+        'Compute the contact stress and compare with the allowable contact stress.',
+        'Compute the root bending stress and compare with its allowable value.',
+        'Conclude pass/fail for each criterion separately, and say which one governs.'] },
+    { id: 'bearing_life', label: 'Rolling bearing life',
+      kw: ['轴承', '寿命', '当量动载荷', '额定动载荷', 'bearing', 'life', 'dynamic load', 'ležaj'],
+      formulas: ['L_{10} = \\left(\\frac{C}{P}\\right)^{\\varepsilon}', 'L_h = \\frac{10^6}{60n}\\left(\\frac{C}{P}\\right)^{\\varepsilon}', 'P = XF_r + YF_a'],
+      steps: ['Work out the equivalent dynamic load P from radial and axial components.',
+        'Pick the exponent: 3 for ball bearings, 10/3 for roller bearings.',
+        'Compute life in millions of revolutions, then convert to hours.',
+        'Compare against the required service life.'] },
+    { id: 'shaft_design', label: 'Shaft strength / stiffness',
+      kw: ['轴', '扭矩', '弯矩', '当量弯矩', '键槽', 'shaft', 'torsion', 'bending moment', 'vratilo'],
+      formulas: ['\\tau = \\frac{T}{W_T} = \\frac{16T}{\\pi d^3}', '\\sigma = \\frac{M}{W} = \\frac{32M}{\\pi d^3}',
+        'M_e = \\sqrt{M^2 + (\\alpha T)^2}', 'd \\ge \\sqrt[3]{\\frac{M_e}{0.1[\\sigma_{-1}]}}'],
+      steps: ['Draw the load layout and find the support reactions.',
+        'Build the bending moment diagram and locate the dangerous section.',
+        'Combine bending and torsion into an equivalent moment.',
+        'Size the diameter, then add allowance for keyways or steps.'] },
+    { id: 'tolerance_fit', label: 'Tolerance and fit',
+      kw: ['公差', '配合', '过盈', '间隙', '基孔制', '基轴制', 'tolerance', 'fit', 'clearance', 'interference', 'tolerancija'],
+      formulas: ['X_{max} = ES - ei', 'X_{min} = EI - es', 'T_f = T_h + T_s'],
+      steps: ['Identify the basis system (hole-basis or shaft-basis) and the fit class.',
+        'Look up or state the deviations ES/EI for the hole and es/ei for the shaft.',
+        'Compute maximum and minimum clearance or interference.',
+        'Name the fit type and check it against the functional requirement.'] },
+    { id: 'mechanism', label: 'Mechanism mobility / kinematics',
+      kw: ['自由度', '机构', '连杆', '运动简图', '四杆', 'degrees of freedom', 'mechanism', 'linkage', 'mehanizam'],
+      formulas: ['F = 3n - 2P_L - P_H'],
+      steps: ['Count the moving links n, lower pairs P_L and higher pairs P_H.',
+        'Remove redundant constraints and idle degrees of freedom before counting.',
+        'Apply the mobility formula and interpret the result.',
+        'For kinematics, set up the vector loop equation and differentiate.'] },
+    { id: 'belt_chain', label: 'Belt or chain drive',
+      kw: ['带传动', '链传动', '包角', '张紧', 'belt drive', 'chain drive', 'wrap angle'],
+      formulas: ['\\frac{F_1}{F_2} = e^{f\\alpha}', 'P = (F_1 - F_2)v', 'v = \\frac{\\pi d n}{60 \\times 1000}', 'i = \\frac{n_1}{n_2} = \\frac{d_2}{d_1}'],
+      steps: ['Compute belt speed from diameter and speed.',
+        'Apply the Euler relation together with the power equation to split the tight and slack side tensions.',
+        'Check the wrap angle and the slip condition.',
+        'Report tensions and the transmitted power.'] },
+  ],
+
+  metal_forming: [
+    { id: 'slab_method', label: 'Slab (equilibrium) method',
+      kw: ['主应力法', '平衡微分', '单位压力', 'slab method', 'equilibrium method'],
+      formulas: ['\\sigma_x + \\sigma_s = \\text{const}', 'p = \\sigma_s\\left(1 + \\frac{2fl}{h}\\right)', '\\sigma_s = \\sigma_{s0}\\varepsilon^n'],
+      steps: ['Cut out a slab element and write force equilibrium along the flow direction.',
+        'Introduce the yield criterion to eliminate one stress component.',
+        'Integrate with the boundary condition at the free surface.',
+        'Report the pressure distribution and the mean unit pressure.'] },
+    { id: 'extrusion', label: 'Extrusion deformation resistance',
+      kw: ['挤压', '变形程度', '挤压力', '挤压比', 'extrusion', 'extrusion ratio', 'ekstruzija'],
+      formulas: ['\\lambda = \\frac{A_0}{A_1}', '\\varepsilon = \\ln\\lambda', 'p_{av} = \\sigma_s(1 + b\\ln\\lambda)', 'P = p_{av} A_0'],
+      steps: ['Compute the extrusion ratio and the logarithmic strain.',
+        'Take the flow stress at that strain (use the given hardening law if any).',
+        'Apply the unit pressure formula including the friction factor b.',
+        'Multiply by the billet area to get total force.'] },
+    { id: 'rolling', label: 'Rolling',
+      kw: ['轧制', '压下量', '咬入', '轧制力', 'rolling', 'draft', 'bite angle'],
+      formulas: ['\\Delta h = h_0 - h_1', 'l_d = \\sqrt{R\\Delta h}', '\\alpha \\le \\arctan f', 'P = p_{av} b l_d'],
+      steps: ['Compute the draft and the projected contact length.',
+        'Check the bite condition against the friction angle.',
+        'Estimate the mean rolling pressure with the chosen model.',
+        'Get the rolling force and torque.'] },
+    { id: 'drawing', label: 'Wire or tube drawing',
+      kw: ['拉拔', '拉丝', '模角', 'drawing', 'die angle'],
+      formulas: ['\\sigma_d = \\sigma_s\\left(1+\\frac{f}{\\tan\\alpha}\\right)\\left[1-\\left(\\frac{A_1}{A_0}\\right)^{f/\\tan\\alpha}\\right]'],
+      steps: ['Compute the area reduction.', 'Apply the drawing stress formula with the die half-angle and friction.',
+        'Check the drawing stress stays below the flow stress of the drawn section.', 'Report the drawing force.'] },
+    { id: 'sheet_stamping', label: 'Blanking and deep drawing',
+      kw: ['冲裁', '拉深', '板料', '冲压', '拉深系数', 'blanking', 'deep drawing', 'stamping'],
+      formulas: ['F = L t \\tau_b', 'm = \\frac{d}{D}', 'F_{draw} = \\pi d t \\sigma_b K'],
+      steps: ['For blanking: perimeter times thickness times shear strength.',
+        'For drawing: check the drawing coefficient against the limit, decide the number of passes.',
+        'Compute the drawing force and the blank-holder force.',
+        'State whether one pass is enough.'] },
+    { id: 'yield_criterion', label: 'Yield criteria',
+      kw: ['屈服准则', '米塞斯', '特雷斯卡', '等效应力', 'yield criterion', 'von Mises', 'Tresca'],
+      formulas: ['\\sigma_{eq} = \\frac{1}{\\sqrt{2}}\\sqrt{(\\sigma_1-\\sigma_2)^2+(\\sigma_2-\\sigma_3)^2+(\\sigma_3-\\sigma_1)^2}',
+        '\\sigma_1 - \\sigma_3 = \\sigma_s'],
+      steps: ['Write down the three principal stresses.', 'Apply von Mises and Tresca separately.',
+        'Compare each with the yield stress.', 'State whether the material yields and which criterion is more conservative here.'] },
+    { id: 'slip_line', label: 'Slip-line field',
+      kw: ['滑移线', '速度场', 'slip-line', 'Hencky'],
+      formulas: ['p + 2k\\varphi = \\text{const (alpha line)}', 'p - 2k\\varphi = \\text{const (beta line)}', 'k = \\frac{\\sigma_s}{\\sqrt{3}}'],
+      steps: ['Sketch the slip-line net and label the alpha and beta families.',
+        'Apply the Hencky equations between the free surface and the point of interest.',
+        'Get the hydrostatic pressure, then the normal pressure on the tool.',
+        'Integrate to the total force.'] },
+  ],
+
+  theoretical_mech: [
+    { id: 'statics', label: 'Static equilibrium',
+      kw: ['平衡', '支座反力', '受力图', '力矩', 'equilibrium', 'reaction', 'free-body', 'ravnoteža'],
+      formulas: ['\\sum F_x = 0', '\\sum F_y = 0', '\\sum M_O = 0'],
+      steps: ['Draw the free-body diagram and mark every force with its assumed direction.',
+        'Choose a moment centre that eliminates as many unknowns as possible.',
+        'Write the three equilibrium equations and solve.',
+        'A negative result means the real direction is opposite to the assumption — say so explicitly.'] },
+    { id: 'truss', label: 'Truss analysis',
+      kw: ['桁架', '节点法', '截面法', '零杆', 'truss', 'method of joints', 'method of sections'],
+      formulas: ['\\sum F_x = 0,\\ \\sum F_y = 0 \\text{ (at each joint)}'],
+      steps: ['Find the support reactions for the whole truss first.',
+        'Identify zero-force members by inspection.',
+        'Use joints for all-member solutions, sections when only a few members are asked.',
+        'Mark each member tension or compression.'] },
+    { id: 'friction', label: 'Friction problems',
+      kw: ['摩擦', '摩擦系数', '自锁', '滑动', 'friction', 'self-locking', 'trenje'],
+      formulas: ['F_{max} = \\mu N', '\\tan\\varphi_f = \\mu'],
+      steps: ['Decide whether motion is impending or already sliding — the friction force differs.',
+        'Write equilibrium including the friction force in the direction opposing motion.',
+        'Check the self-locking condition if asked.',
+        'Verify the assumption afterwards (does the required friction exceed the maximum?).'] },
+    { id: 'beam_internal', label: 'Beam internal forces',
+      kw: ['梁', '剪力', '弯矩', '剪力图', '弯矩图', 'beam', 'shear force', 'bending moment', 'greda'],
+      formulas: ['\\frac{dM}{dx} = Q', '\\frac{dQ}{dx} = -q', 'M_{max} \\text{ where } Q = 0'],
+      steps: ['Find the reactions.', 'Section the beam in each load interval and write Q(x) and M(x).',
+        'Sketch the shear and moment diagrams, marking values at every discontinuity.',
+        'Locate the maximum moment where shear crosses zero.'] },
+    { id: 'stress_state', label: 'Stress state / principal stresses',
+      kw: ['应力状态', '主应力', '莫尔圆', '应力圆', 'principal stress', "Mohr's circle", 'napon'],
+      formulas: ['\\sigma_{1,2} = \\frac{\\sigma_x+\\sigma_y}{2} \\pm \\sqrt{\\left(\\frac{\\sigma_x-\\sigma_y}{2}\\right)^2 + \\tau_{xy}^2}',
+        '\\tan 2\\alpha_0 = \\frac{-2\\tau_{xy}}{\\sigma_x-\\sigma_y}', '\\tau_{max} = \\frac{\\sigma_1-\\sigma_3}{2}'],
+      steps: ['List the stress components on the element.', 'Compute the principal stresses and their orientation.',
+        'Compute the maximum shear stress.', 'Apply the relevant strength theory if a check is asked.'] },
+    { id: 'deflection', label: 'Beam deflection',
+      kw: ['挠度', '转角', '刚度', '叠加法', 'deflection', 'slope', 'stiffness'],
+      formulas: ['EI\\frac{d^2 y}{dx^2} = M(x)', 'y_{max} = \\frac{Fl^3}{3EI} \\text{ (cantilever, end load)}',
+        'y_{max} = \\frac{5ql^4}{384EI} \\text{ (simply supported, UDL)}'],
+      steps: ['Pick a method: direct integration, superposition, or a standard table.',
+        'Apply the boundary conditions carefully.', 'Get slope and deflection at the asked section.',
+        'Compare against the stiffness allowance.'] },
+    { id: 'buckling', label: 'Column buckling',
+      kw: ['压杆', '稳定', '临界力', '柔度', '欧拉', 'buckling', 'critical load', 'slenderness', 'Euler'],
+      formulas: ['P_{cr} = \\frac{\\pi^2 EI}{(\\mu l)^2}', '\\lambda = \\frac{\\mu l}{i}', 'i = \\sqrt{\\frac{I}{A}}'],
+      steps: ['Determine the effective length factor from the end conditions.',
+        'Compute the slenderness ratio and decide whether Euler applies.',
+        'Compute the critical load with the correct formula for that range.',
+        'Apply the stability safety factor.'] },
+  ],
+
+  adv_math: [
+    { id: 'limit', label: 'Limits',
+      kw: ['极限', '洛必达', '等价无穷小', 'limit', "L'Hospital", 'infinitesimal'],
+      formulas: ["\\lim_{x\\to a}\\frac{f(x)}{g(x)} = \\lim_{x\\to a}\\frac{f'(x)}{g'(x)}", '\\lim_{x\\to 0}\\frac{\\sin x}{x} = 1', '\\lim_{x\\to\\infty}\\left(1+\\frac{1}{x}\\right)^x = e'],
+      steps: ['Classify the indeterminate form first.', 'Try equivalent infinitesimals or algebraic simplification before differentiating.',
+        "Apply L'Hospital only to 0/0 or inf/inf, and verify the form each time.", 'State the limit.'] },
+    { id: 'derivative_app', label: 'Derivatives and applications',
+      kw: ['导数', '微分', '单调', '极值', '凹凸', '泰勒', 'derivative', 'monotonic', 'extremum', 'Taylor'],
+      formulas: ['(uv)\' = u\'v + uv\'', '\\left(\\frac{u}{v}\\right)\' = \\frac{u\'v-uv\'}{v^2}',
+        'f(x) = \\sum_{n=0}^{\\infty}\\frac{f^{(n)}(x_0)}{n!}(x-x_0)^n'],
+      steps: ['Differentiate and find the critical points.', 'Use the sign of the first derivative for monotonicity, the second for concavity.',
+        'Check endpoints and non-differentiable points too.', 'Tabulate the intervals and state the extrema.'] },
+    { id: 'integral', label: 'Integration',
+      kw: ['积分', '定积分', '不定积分', '分部', '换元', '广义积分', 'integral', 'by parts', 'substitution'],
+      formulas: ['\\int u\\,dv = uv - \\int v\\,du', '\\int_a^b f(x)dx = F(b)-F(a)'],
+      steps: ['Choose the technique: substitution, by parts, partial fractions, or trigonometric.',
+        'For by parts, pick u by the LIATE order.', 'Carry the limits through a substitution, or convert back before evaluating.',
+        'Keep the exact form unless a decimal is asked.'] },
+    { id: 'series', label: 'Series',
+      kw: ['级数', '收敛', '发散', '幂级数', '收敛半径', '傅里叶', 'series', 'convergence', 'radius', 'Fourier'],
+      formulas: ['R = \\lim_{n\\to\\infty}\\left|\\frac{a_n}{a_{n+1}}\\right|', '\\sum_{n=1}^{\\infty}\\frac{1}{n^p} \\text{ converges iff } p>1'],
+      steps: ['Pick a convergence test that matches the term shape (ratio, root, comparison, integral, alternating).',
+        'For power series, get the radius first, then test the endpoints separately.',
+        'State the interval of convergence precisely.'] },
+    { id: 'ode', label: 'Ordinary differential equations',
+      kw: ['微分方程', '通解', '特解', '齐次', '线性', 'differential equation', 'general solution'],
+      formulas: ['y\' + P(x)y = Q(x) \\Rightarrow y = e^{-\\int P dx}\\left(\\int Q e^{\\int P dx}dx + C\\right)',
+        'ay\'\' + by\' + cy = 0 \\Rightarrow ar^2+br+c=0'],
+      steps: ['Classify the equation: separable, homogeneous, linear first order, or constant-coefficient.',
+        'Solve the homogeneous part, then find a particular solution if the equation is non-homogeneous.',
+        'Combine into the general solution.', 'Apply the initial conditions if given.'] },
+    { id: 'multivariable', label: 'Multivariable calculus',
+      kw: ['偏导', '全微分', '多元', '二重积分', '三重积分', '曲线积分', '曲面积分', 'partial derivative', 'double integral', 'line integral'],
+      formulas: ['dz = \\frac{\\partial z}{\\partial x}dx + \\frac{\\partial z}{\\partial y}dy',
+        '\\iint_D f\\,dxdy = \\int\\!\\!\\int f(r\\cos\\theta, r\\sin\\theta)\\,r\\,drd\\theta'],
+      steps: ['Sketch or describe the region of integration.', 'Choose the coordinate system that matches the region.',
+        'Set the integration order and the limits explicitly.', 'Evaluate the inner integral first.'] },
+  ],
+
+  linear_algebra: [
+    { id: 'determinant', label: 'Determinants',
+      kw: ['行列式', '余子式', '代数余子式', 'determinant', 'cofactor', 'determinanta'],
+      formulas: ['\\det(A) = \\sum_j (-1)^{i+j}a_{ij}M_{ij}', '\\det(AB) = \\det(A)\\det(B)'],
+      steps: ['Use row operations to create zeros before expanding.', 'Expand along the row or column with most zeros.',
+        'Watch the sign pattern.', 'State the value.'] },
+    { id: 'linear_system', label: 'Systems of linear equations',
+      kw: ['线性方程组', '高斯', '初等行变换', '基础解系', '秩', 'linear system', 'Gaussian', 'rank', 'sistem jednačina'],
+      formulas: ['r(A) = r(A|b) = n \\Rightarrow \\text{unique solution}', 'r(A) = r(A|b) < n \\Rightarrow \\text{infinitely many}'],
+      steps: ['Build the augmented matrix and reduce to row echelon form.',
+        'Compare the ranks of the coefficient and augmented matrices.',
+        'For infinitely many solutions, pick free variables and write the fundamental system.',
+        'Present the general solution as a particular solution plus the null space.'] },
+    { id: 'matrix_ops', label: 'Matrix operations and inverse',
+      kw: ['矩阵', '逆矩阵', '伴随', '初等变换', 'matrix', 'inverse', 'adjugate', 'matrica'],
+      formulas: ['A^{-1} = \\frac{1}{\\det(A)}A^{*}', '(AB)^{-1} = B^{-1}A^{-1}', '(A^T)^{-1} = (A^{-1})^T'],
+      steps: ['Check invertibility via the determinant.', 'Use the adjugate for small matrices, row reduction for larger ones.',
+        'Verify by multiplying back to the identity.'] },
+    { id: 'eigen', label: 'Eigenvalues and eigenvectors',
+      kw: ['特征值', '特征向量', '对角化', '相似', 'eigenvalue', 'eigenvector', 'diagonalization', 'sopstvena'],
+      formulas: ['\\det(A - \\lambda I) = 0', 'A\\mathbf{x} = \\lambda\\mathbf{x}', 'A = P\\Lambda P^{-1}'],
+      steps: ['Write and solve the characteristic equation.', 'For each eigenvalue, solve the null space to get the eigenvectors.',
+        'Check whether the geometric multiplicity matches the algebraic one.',
+        'If diagonalizable, assemble P and Lambda.'] },
+    { id: 'quadratic_form', label: 'Quadratic forms',
+      kw: ['二次型', '标准形', '正定', '惯性', 'quadratic form', 'positive definite', 'canonical form'],
+      formulas: ['f = \\mathbf{x}^T A \\mathbf{x}', 'A \\text{ positive definite} \\iff \\text{all leading minors} > 0'],
+      steps: ['Write the symmetric matrix of the form.', 'Reduce by orthogonal transformation or by completing squares.',
+        'Report the canonical form, rank and signature.', 'Decide definiteness.'] },
+  ],
+
+  statistics: [
+    { id: 'descriptive', label: 'Descriptive statistics',
+      kw: ['均值', '方差', '标准差', '中位数', '众数', '频率分布', '箱线图', 'mean', 'variance', 'standard deviation', 'median', 'srednja vrednost'],
+      formulas: ['\\bar{x} = \\frac{1}{n}\\sum_{i=1}^{n}x_i', 's^2 = \\frac{1}{n-1}\\sum_{i=1}^{n}(x_i-\\bar{x})^2',
+        's^2 = \\frac{1}{n-1}\\left(\\sum x_i^2 - n\\bar{x}^2\\right)', 'CV = \\frac{s}{\\bar{x}}'],
+      steps: ['Tabulate the data; state n.', 'Compute the mean, then the sample variance with the n-1 denominator (say why it is n-1).',
+        'Report median and mode if asked, and note skewness from their relative order.',
+        'Keep units and give a sensible number of significant figures.'] },
+    { id: 'probability', label: 'Probability rules',
+      kw: ['概率', '古典概型', '条件概率', '独立', '全概率', '贝叶斯', 'probability', 'conditional', 'Bayes', 'verovatnoća'],
+      formulas: ['P(A\\cup B) = P(A)+P(B)-P(A\\cap B)', 'P(A|B) = \\frac{P(AB)}{P(B)}',
+        'P(B) = \\sum_i P(A_i)P(B|A_i)', 'P(A_i|B) = \\frac{P(A_i)P(B|A_i)}{\\sum_j P(A_j)P(B|A_j)}'],
+      steps: ['Define the events precisely with symbols before computing anything.',
+        'Decide whether the events are independent, mutually exclusive, or neither.',
+        'Pick the rule: addition, multiplication, total probability, or Bayes.',
+        'Sanity-check that the result lies in [0, 1].'] },
+    { id: 'distribution', label: 'Probability distributions',
+      kw: ['分布', '二项', '泊松', '正态', '指数', '均匀', '期望', '方差', 'binomial', 'Poisson', 'normal', 'exponential', 'raspodela'],
+      formulas: ['P(X=k) = \\binom{n}{k}p^k(1-p)^{n-k}', 'P(X=k) = \\frac{\\lambda^k e^{-\\lambda}}{k!}',
+        'Z = \\frac{X-\\mu}{\\sigma} \\sim N(0,1)', 'E(X) = np,\\ D(X) = np(1-p)'],
+      steps: ['Identify the distribution and its parameters from the wording.',
+        'Write the pmf/pdf with the parameters substituted.',
+        'For normal problems, standardise to Z and read the table value.',
+        'State the probability, and the expectation/variance if asked.'] },
+    { id: 'estimation', label: 'Point and interval estimation',
+      kw: ['估计', '置信区间', '矩估计', '极大似然', '无偏', 'estimation', 'confidence interval', 'maximum likelihood', 'interval poverenja'],
+      formulas: ['\\bar{x} \\pm z_{\\alpha/2}\\frac{\\sigma}{\\sqrt{n}} \\quad (\\sigma \\text{ known})',
+        '\\bar{x} \\pm t_{\\alpha/2}(n-1)\\frac{s}{\\sqrt{n}} \\quad (\\sigma \\text{ unknown})',
+        '\\frac{(n-1)s^2}{\\chi^2_{\\alpha/2}} < \\sigma^2 < \\frac{(n-1)s^2}{\\chi^2_{1-\\alpha/2}}'],
+      steps: ['Decide which parameter is being estimated and whether the population variance is known.',
+        'Pick z, t or chi-square accordingly, and state the degrees of freedom.',
+        'Look up the critical value for the given confidence level.',
+        'Build the interval and interpret it in words — not "the parameter has 95% probability of being inside".'] },
+    { id: 'hypothesis_test', label: 'Hypothesis testing',
+      kw: ['假设检验', '原假设', '显著性', '拒绝域', 'p值', '检验统计量', 'hypothesis test', 'null hypothesis', 'significance', 'p-value'],
+      formulas: ['Z = \\frac{\\bar{x}-\\mu_0}{\\sigma/\\sqrt{n}}', 't = \\frac{\\bar{x}-\\mu_0}{s/\\sqrt{n}},\\ df = n-1',
+        '\\chi^2 = \\sum\\frac{(O_i-E_i)^2}{E_i}'],
+      steps: ['State H0 and H1 explicitly, and whether the test is one- or two-tailed.',
+        'Choose the statistic (z, t, chi-square, F) and justify the choice.',
+        'Compute the statistic and compare with the critical value, or compute the p-value.',
+        'Conclude in the language of the problem, and name the significance level. Never say "H0 is proved true".'] },
+    { id: 'regression', label: 'Regression and correlation',
+      kw: ['回归', '最小二乘', '相关系数', '拟合', 'regression', 'least squares', 'correlation', 'regresija'],
+      formulas: ['\\hat{b} = \\frac{\\sum(x_i-\\bar{x})(y_i-\\bar{y})}{\\sum(x_i-\\bar{x})^2}', '\\hat{a} = \\bar{y} - \\hat{b}\\bar{x}',
+        'r = \\frac{S_{xy}}{\\sqrt{S_{xx}S_{yy}}}', 'R^2 = r^2'],
+      steps: ['Build the sums table: sum x, sum y, sum xy, sum x squared.',
+        'Compute the slope and intercept of the least-squares line.',
+        'Compute r and interpret strength and direction.',
+        'Test the significance of the regression if asked, and never read correlation as causation.'] },
+    { id: 'anova', label: 'Analysis of variance',
+      kw: ['方差分析', '单因素', 'anova', 'F检验', 'sum of squares', 'analiza varijanse'],
+      formulas: ['SS_T = SS_A + SS_E', 'F = \\frac{MS_A}{MS_E} = \\frac{SS_A/(k-1)}{SS_E/(n-k)}'],
+      steps: ['State the hypothesis about the group means.', 'Compute the total, between-group and within-group sums of squares.',
+        'Build the ANOVA table with degrees of freedom and mean squares.',
+        'Compare F with the critical value and conclude.'] },
+  ],
+
+  other: [],
+};
+
+/** 该科目所有题型的 id 列表，给拆题阶段做候选。 */
+export function methodIds(subjectKey) {
+  return (METHODS[subjectKey] || []).map((m) => m.id);
+}
+
+/**
+ * 按题型 id 取卡片；拿不到就用关键词在题干里兜底匹配。
+ * 模型偶尔会漏填或填错 type，兜底能保证大多数题仍走到正确的解法。
+ */
+export function pickMethod(subjectKey, typeId, statement) {
+  const list = METHODS[subjectKey] || [];
+  if (!list.length) return null;
+  const byId = list.find((m) => m.id === typeId);
+  if (byId) return byId;
+
+  // 按关键词长度加权，而不是只数命中个数：
+  // 「求总体均值的95%置信区间」里"均值"和"置信区间"各命中一次，
+  // 单纯计数会让先定义的"描述统计"赢；越长的词越具体，权重应当越高。
+  const text = String(statement || '').toLowerCase();
+  let best = null;
+  let bestScore = 0;
+  for (const m of list) {
+    let score = 0;
+    for (const k of m.kw) {
+      if (text.includes(k.toLowerCase())) score += k.length;
+    }
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+/** 把一张卡片渲染成提示词片段。 */
+export function methodBlock(method) {
+  if (!method) return '';
+  return [
+    `Recognised question type: ${method.label}.`,
+    'Use the standard method below. Do not invent a different route unless the data makes it impossible,',
+    'in which case say so explicitly before switching.',
+    '',
+    'Core relations:',
+    ...method.formulas.map((f) => `  $$${f}$$`),
+    '',
+    'Standard procedure:',
+    ...method.steps.map((s, i) => `  ${i + 1}. ${s}`),
+  ].join('\n');
+}

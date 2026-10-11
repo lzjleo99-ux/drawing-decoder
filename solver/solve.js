@@ -92,7 +92,7 @@ export async function solve(extracted, opts, log) {
   log(images.length ? TF('slog.splittingImg', { n: images.length }) : T('slog.splitting'));
   let paper;
   try {
-    paper = await sample.json(splitPrompt(extracted.text || '(无文字内容)', images.length > 0), { images, tier });
+    paper = await sample.json(splitPrompt(extracted.text || '(empty)', images.length > 0, subjectKey), { images, tier });
   } catch (e) {
     throw new Error(TF('serr.split', { msg: describeError(e) }));
   }

@@ -41,6 +41,7 @@ const UI = {
   "solver.subj.theoretical_mech": { zh: "理论力学 / 材料力学", en: "Engineering & Material Mechanics", sr: "Tehnička mehanika i otpornost materijala" },
   "solver.subj.adv_math": { zh: "高等数学", en: "Advanced Mathematics", sr: "Viša matematika" },
   "solver.subj.linear_algebra": { zh: "线性代数", en: "Linear Algebra", sr: "Linearna algebra" },
+  "solver.subj.statistics": { zh: "概率论与数理统计", en: "Probability & Statistics", sr: "Verovatnoća i statistika" },
   "solver.subj.other": { zh: "其他理工科", en: "Other science & engineering", sr: "Ostale tehničke oblasti" },
 
   "solver.mod.mech_eng": { zh: "齿轮传动、轴承校核、公差配合、机构运动", en: "gear drives, bearing checks, tolerances and fits, mechanism kinematics", sr: "zupčanici, proračun ležajeva, tolerancije i naleganja, kinematika mehanizama" },
@@ -48,6 +49,7 @@ const UI = {
   "solver.mod.theoretical_mech": { zh: "静力学平衡、受力图、梁的内力、应力状态分析", en: "statics, free-body diagrams, beam internal forces, stress analysis", sr: "statika, dijagrami slobodnog tela, unutrašnje sile u gredama, analiza napona" },
   "solver.mod.adv_math": { zh: "微积分、级数、常微分方程、空间解析几何", en: "calculus, series, ordinary differential equations, analytic geometry", sr: "analiza, redovi, diferencijalne jednačine, analitička geometrija" },
   "solver.mod.linear_algebra": { zh: "矩阵运算、特征值与特征向量、二次型、线性方程组", en: "matrix operations, eigenvalues and eigenvectors, quadratic forms, linear systems", sr: "matrice, sopstvene vrednosti i vektori, kvadratne forme, sistemi jednačina" },
+  "solver.mod.statistics": { zh: "描述统计、概率分布、参数估计、假设检验、回归与方差分析", en: "descriptive statistics, probability distributions, estimation, hypothesis testing, regression and ANOVA", sr: "deskriptivna statistika, raspodele, ocenjivanje, testiranje hipoteza, regresija i ANOVA" },
   "solver.mod.other": { zh: "", en: "", sr: "" },
 
   "solver.diagYes": { zh: "支持自动作图", en: "diagrams supported", sr: "dijagrami podržani" },

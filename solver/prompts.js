@@ -9,6 +9,7 @@
 
 import { SUBJECTS } from './config.js';
 import { T } from './ui.js';
+import { methodIds, pickMethod, methodBlock } from './methods.js';
 
 // temml/KaTeX 支持的是 LaTeX 的一个子集，写出它不认的命令就会渲染失败。
 // 这段约束同时服务于 DOCX 导出：Word 那条路径无法测量宽度，
@@ -39,7 +40,12 @@ Diagram rules (only draw when a diagram genuinely helps):
   all elements fall inside the viewBox.
 `.trim();
 
-export function splitPrompt(sourceText, hasImages) {
+export function splitPrompt(sourceText, hasImages, subjectKey) {
+  const ids = methodIds(subjectKey);
+  const typeRule = ids.length
+    ? `- Tag each question with "type", choosing the single best match from this list:\n  ${ids.join(', ')}\n  Use "" if none of them fits. This only routes the question to a standard method; do not solve anything.`
+    : '- Leave "type" as an empty string.';
+
   return `You are an expert at parsing science and engineering exam papers.
 Split the document below into individual questions.
 
@@ -55,8 +61,10 @@ Rules:
 - Split only. Do not solve anything.
 - Exam instructions, name fields and score boxes are not questions — ignore them.
 
+${typeRule}
+
 Output JSON only, no prose:
-{"doc_title":"...","questions":[{"number":"...","title":"<=20 chars","statement":"...","figure_refs":[]}]}
+{"doc_title":"...","questions":[{"number":"...","title":"<=20 chars","statement":"...","figure_refs":[],"type":"..."}]}
 
 Document:
 ${sourceText}`;
@@ -76,6 +84,13 @@ export function solveOneQuestion(subjectKey, question, opts) {
     ? `\nFigures referenced by this question: ${question.figure_refs.join(', ')} (attached as images)`
     : '';
 
+  // 只注入这一题用得上的那张解法卡片。给出标准方法后模型不必自己摸索路线，
+  // 推理量明显下降，解法也更贴合教材。匹配不到就退回通用提示词。
+  const method = pickMethod(subjectKey, question.type, question.statement);
+  const methodHint = method
+    ? `\n${methodBlock(method)}\n`
+    : '';
+
   return `You are an experienced teacher of ${subjectName} (${subject.en}), writing a worked solution for a student.
 ${moduleHint}
 
@@ -92,6 +107,7 @@ Requirements:
   pretend the data is complete.
 - "statement" in your output is the question restated in the answer language above.
 
+${methodHint}
 ${LATEX_RULES}
 
 ${diagramHint}

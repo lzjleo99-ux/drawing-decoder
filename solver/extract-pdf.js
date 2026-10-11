@@ -5,7 +5,7 @@
 // 画到 canvas 上，再转成图片送进视觉通道。Node 版做不到这点是因为
 // 服务端渲染需要 canvas 原生模块（依赖 cairo），本机装不了。
 
-import { PDF_VISION_MAX_PAGES, PDF_RENDER_SCALE } from './config.js';
+import { PDF_VISION_MAX_PAGES, PDF_RENDER_SCALE, PDF_FIGURE_SCALE } from './config.js';
 
 const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/+esm';
 const WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/build/pdf.worker.min.mjs';
@@ -61,9 +61,34 @@ function detectBodyPt(sizeCounts) {
   return Math.round(best * 2) / 2; // 归到 0.5pt
 }
 
+/**
+ * 探测一页里有没有图形。
+ * 两类都算：位图（paintImageXObject 等）和矢量线条图——工程图、受力图、
+ * 坐标系大多是矢量路径画出来的，只看位图会把它们全漏掉。
+ * @returns {{images:number, paths:number, hasFigure:boolean}}
+ */
+async function detectFigures(page, OPS) {
+  try {
+    const ops = await page.getOperatorList();
+    let images = 0;
+    let paths = 0;
+    for (const fn of ops.fnArray) {
+      if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) images++;
+      else if (fn === OPS.constructPath) paths++;
+    }
+    // 阈值是量出来的，不是拍的：pdf.js 会把整条路径序列合并成一个 constructPath，
+    // 实测纯文字页只有 1 个（页眉线之类），矢量受力图页 10 个，内嵌图页 3 个。
+    // 定在 3 既能抓住图，也不会把纯文字页误判进来。
+    // 代价：带框线的表格页可能被当成有图——多渲染一页只是多花点 token，不会出错。
+    return { images, paths, hasFigure: images > 0 || paths >= 3 };
+  } catch {
+    return { images: 0, paths: 0, hasFigure: false };
+  }
+}
+
 /** 把一页渲染成 PNG Blob，供视觉通道识别公式与图形。 */
-async function renderPageToBlob(page) {
-  const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+async function renderPageToBlob(page, scale = PDF_RENDER_SCALE) {
+  const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
@@ -92,8 +117,10 @@ export async function extractPdf(buf, log = () => {}) {
   const pages = [];
   const images = [];
   const sizeCounts = new Map();
-  const visionPages = Math.min(doc.numPages, PDF_VISION_MAX_PAGES);
 
+  // 第一遍：抽文字、量字号、探测图形。不在这一遍渲染，
+  // 因为要先知道哪些页有图，才能决定把有限的图片名额给谁。
+  const survey = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const tc = await page.getTextContent();
@@ -102,21 +129,43 @@ export async function extractPdf(buf, log = () => {}) {
       const pt = Math.round(Math.hypot(it.transform[2], it.transform[3]) * 2) / 2;
       if (pt >= 6 && pt <= 36) sizeCounts.set(pt, (sizeCounts.get(pt) || 0) + it.str.length);
     }
-    pages.push(`--- 第 ${i} 页 ---\n${itemsToLines(tc.items).join('\n')}`);
-    if (i <= visionPages) {
-      log(`正在渲染第 ${i}/${visionPages} 页供识别…`);
-      images.push({ index: i, blob: await renderPageToBlob(page) });
+    const lines = itemsToLines(tc.items);
+    const chars = lines.join('').length;
+    pages.push(`--- 第 ${i} 页 ---\n${lines.join('\n')}`);
+    const fig = await detectFigures(page, pdfjs.OPS);
+    survey.push({ i, page, chars, ...fig });
+  }
+
+  // 名额分配：有图的页优先，其次是文字极少的页（多半是扫描件），
+  // 其余按页序补齐。最后仍按页序送出，保持与题目顺序一致。
+  const budget = Math.min(doc.numPages, PDF_VISION_MAX_PAGES);
+  const ranked = [...survey].sort((a, b) => {
+    if (a.hasFigure !== b.hasFigure) return a.hasFigure ? -1 : 1;
+    if (a.chars < 50 !== (b.chars < 50)) return a.chars < 50 ? -1 : 1;
+    return a.i - b.i;
+  });
+  const chosen = new Set(ranked.slice(0, budget).map((x) => x.i));
+  const figurePages = survey.filter((x) => x.hasFigure).length;
+
+  for (const item of survey) {
+    if (chosen.has(item.i)) {
+      // 含图的页用更高倍率渲染：受力图上的小字号标注在 1.5 倍下常常糊掉
+      const scale = item.hasFigure ? PDF_FIGURE_SCALE : PDF_RENDER_SCALE;
+      log(`正在渲染第 ${item.i} 页${item.hasFigure ? '（含图形）' : ''}…`);
+      images.push({ index: item.i, blob: await renderPageToBlob(item.page, scale) });
     }
-    page.cleanup();
+    item.page.cleanup();
   }
 
   const text = pages.join('\n\n');
   const pageCount = doc.numPages;
   await task.destroy();
 
-  if (pageCount > visionPages) {
-    warnings.push(`文档共 ${pageCount} 页，仅前 ${visionPages} 页送入视觉识别（单次请求的图片数量上限），其余页只用文字层`);
+  if (pageCount > budget) {
+    const picked = [...chosen].sort((a, b) => a - b).join(', ');
+    warnings.push(`文档共 ${pageCount} 页，受单次请求图片数量上限所限只送了 ${budget} 页（第 ${picked} 页，含图形的页优先），其余页仅使用文字层`);
   }
+  if (figurePages) warnings.push(`检测到 ${figurePages} 页含图形，已按更高倍率渲染以便识别图中标注`);
 
   const charsPerPage = text.replace(/--- 第 \d+ 页 ---/g, '').trim().length / Math.max(1, pageCount);
   if (charsPerPage < 50) {
