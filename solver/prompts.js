@@ -11,6 +11,21 @@ import { SUBJECTS } from './config.js';
 import { T } from './ui.js';
 import { methodIds, pickMethod, methodBlock } from './methods.js';
 
+/**
+ * 是否把解法卡片注入提示词。
+ *
+ * 默认关闭 —— 这是实测结论，不是偏好。用 Apex 的 Qwen3.8-27B 做配对对比
+ * （同一份提示词，只把卡片那一段删掉，其余完全相同）：
+ *   统计·区间估计   无卡片 51.3s/推理 6107   有卡片 71.4s/推理 9463
+ *   同题复测        无卡片 91.6s/推理 12280  有卡片 113.8s/推理 13466
+ *   机械·轴强度(难) 两者都是推理约 1.8 万字、正文 0 字、撞上 max_tokens
+ * 卡片只增加开销，难题上也救不了场；真正的瓶颈是 token 预算（见 solve.js）。
+ *
+ * 卡片库本身保留：39 张卡片、110 条公式都过了渲染校验，
+ * 想重新启用（或改成只注入一行提示再做 A/B）把这里改 true 即可。
+ */
+const INJECT_METHOD_CARDS = false;
+
 // temml/KaTeX 支持的是 LaTeX 的一个子集，写出它不认的命令就会渲染失败。
 // 这段约束同时服务于 DOCX 导出：Word 那条路径无法测量宽度，
 // 所以靠"每个公式只写一步"从源头避免超宽。
@@ -41,7 +56,7 @@ Diagram rules (only draw when a diagram genuinely helps):
 `.trim();
 
 export function splitPrompt(sourceText, hasImages, subjectKey) {
-  const ids = methodIds(subjectKey);
+  const ids = INJECT_METHOD_CARDS ? methodIds(subjectKey) : [];
   const typeRule = ids.length
     ? `- Tag each question with "type", choosing the single best match from this list:\n  ${ids.join(', ')}\n  Use "" if none of them fits. This only routes the question to a standard method; do not solve anything.`
     : '- Leave "type" as an empty string.';
@@ -86,10 +101,8 @@ export function solveOneQuestion(subjectKey, question, opts) {
 
   // 只注入这一题用得上的那张解法卡片。给出标准方法后模型不必自己摸索路线，
   // 推理量明显下降，解法也更贴合教材。匹配不到就退回通用提示词。
-  const method = pickMethod(subjectKey, question.type, question.statement);
-  const methodHint = method
-    ? `\n${methodBlock(method)}\n`
-    : '';
+  const method = INJECT_METHOD_CARDS ? pickMethod(subjectKey, question.type, question.statement) : null;
+  const methodHint = method ? `\n${methodBlock(method)}\n` : '';
 
   return `You are an experienced teacher of ${subjectName} (${subject.en}), writing a worked solution for a student.
 ${moduleHint}
