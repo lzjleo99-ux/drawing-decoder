@@ -87,12 +87,16 @@ export async function solve(extracted, opts, log) {
   const subject = SUBJECTS[subjectKey];
   const images = (extracted.images || []).map((i) => i.blob).filter(Boolean);
   const tier = opts.tier || 'default';
+  // max_tokens 是上限不是预付额度：调高不会多花钱，只有真的多生成才计费。
+  // 实测一道多步的轴强度校核题在 8192 下推理就把预算吃光、正文 0 字；
+  // 放到 32000 后同一道题正常解出。所以除了显式选"快速"的场合，一律给足预算。
+  const maxPower = tier !== 'quick';
 
   // ---- 第一阶段：拆题 ----
   log(images.length ? TF('slog.splittingImg', { n: images.length }) : T('slog.splitting'));
   let paper;
   try {
-    paper = await sample.json(splitPrompt(extracted.text || '(empty)', images.length > 0, subjectKey), { images, tier });
+    paper = await sample.json(splitPrompt(extracted.text || '(empty)', images.length > 0, subjectKey), { images, tier, maxPower });
   } catch (e) {
     throw new Error(TF('serr.split', { msg: describeError(e) }));
   }
@@ -111,6 +115,7 @@ export async function solve(extracted, opts, log) {
       const raw = await sample.json(solveOneQuestion(subjectKey, q, { autoDraw: opts.autoDraw }), {
         images: needsImages ? images : [],
         tier,
+        maxPower,
       });
       requireShape(raw, (o) => Array.isArray(o.blocks), `第 ${q.number} 题`);
       log(TF('slog.qDone', { n: q.number }), 'ok');
@@ -134,7 +139,7 @@ export async function solve(extracted, opts, log) {
     }
   };
 
-  log(TF('slog.solveStart', { c: opts.concurrency || 2, tier }));
+  log(TF('slog.solveStart', { c: opts.concurrency || 2, tier }) + (maxPower ? ' (max_tokens 32000)' : ' (max_tokens 8192)'));
   const solved = await pooled(questions, opts.concurrency || 2, solveOne);
   const failedCount = solved.filter((q) => q.failed).length;
   if (failedCount) log(TF('slog.someFailed', { n: failedCount }), 'warn');
