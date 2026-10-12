@@ -8,6 +8,29 @@
   #out { white-space: pre-wrap; margin: 0; }
   #stage { position: absolute; left: -10000px; top: 0; width: 640px; }
 </style>
+
+<!-- [FIX] 新增：承载页错误兜底。三点约束决定它必须是内联经典脚本、且放在模块脚本之前 ——
+       1) <script type="module"> 的加载/解析是"全成全败"：任何一条 import 取不到（离线、CDN 故障）
+          或有语法错误，整个模块体一行都不执行，tests.mjs 里那个 try/catch 也进不去，
+          window.__TEST_RESULT__ 永远不会被赋值；
+       2) 资源加载失败触发的 error 事件不冒泡，只有捕获阶段（第三个参数 true）收得到；
+       3) 模块脚本是异步的，本脚本必须先跑完，错误监听器才来得及挂上。
+       于是模块加载之前就把窗口立起来，失败立刻落到 __HARNESS_ERROR__，
+       由 test/run.mjs 读取并立即报错，而不是干等 240 秒。 -->
+<script>
+window.__HARNESS_READY__ = true;
+window.__HARNESS_ERROR__ = null;
+window.addEventListener('error', function (e) {
+  if (window.__HARNESS_ERROR__) return;            // 只记第一条，避免错误风暴刷屏
+  var at = e.filename ? ('  ↳ @ ' + e.filename + ':' + e.lineno + ':' + e.colno) : '';
+  window.__HARNESS_ERROR__ = String(e.message || 'unknown error') + at;
+}, true);
+window.addEventListener('unhandledrejection', function (e) {
+  if (window.__HARNESS_ERROR__) return;
+  window.__HARNESS_ERROR__ = 'unhandled rejection: ' + String((e.reason && e.reason.message) || e.reason);
+});
+</script>
+<!-- [FIX] end -->
 </head>
 <body>
 <pre id="out">running…</pre>
