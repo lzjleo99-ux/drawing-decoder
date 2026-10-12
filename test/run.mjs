@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startServer } from './serve.mjs';
+import { checkServerSafety } from './server-safety.mjs';
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -63,6 +64,16 @@ function findChrome() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** [FIX] 清理临时目录：删不动就退避重试，实在不行只告警，绝不让清理失败掩盖测试结论。 */
+async function safeRm(dir, tries = 5) {
+  for (let i = 0; i < tries; i++) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); return true; }
+    catch (e) { await sleep(150 * (i + 1)); }
+  }
+  console.error(`（提示）临时目录删除失败，可手动删除：${dir}`);
+  return false;
+}
 
 /** 极简 CDP 客户端：按 id 配对请求与响应。 */
 function makeCdp(ws) {
@@ -127,7 +138,10 @@ const args = [
   'about:blank',
 ];
 
-const child = spawn(chrome, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+// [FIX] detached: true 让 Chrome 成为独立进程组的组长。只 kill 主进程的话，
+// 它的 zygote / GPU / 工具子进程会比主进程活得久，继续往 profile 里写文件，
+// 紧接着的 rmSync 就会 ENOTEMPTY 把整个测试运行搞崩。整组杀掉才干净。
+const child = spawn(chrome, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
 let chromeErr = '';
 child.stderr.on('data', (c) => { chromeErr += c; });
 
@@ -242,9 +256,29 @@ try {
   if (noise) console.error(noise);
 } finally {
   try { ws?.close(); } catch { /* ignore */ }
-  child.kill('SIGKILL');
+  // [FIX] 杀整个进程组，而不是只杀主进程
+  try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* 已退出 */ } }
   await server.close();
-  fs.rmSync(profile, { recursive: true, force: true });
+  await safeRm(profile);
+}
+
+// [FIX] 追加第二阶段：静态服务器路径安全回归。
+// 它必须跑在 Node 侧 —— 浏览器 fetch/XHR 会在客户端把 ".." 归一化掉，请求根本到不了
+// 服务器，所以在 tests.mjs 里写断言测不到目录穿越。详见 server-safety.mjs 顶部说明。
+// 放在 finally 之后，保证浏览器阶段无论成败都会清理完再跑这段。
+let safety = null;
+try {
+  safety = await checkServerSafety();
+} catch (e) {
+  console.error(`路径安全自检运行失败：${e.message}`);
+}
+
+if (!safety) {
+  exitCode = 1;
+} else {
+  console.log(safety.text);
+  if (safety.fail > 0) exitCode = 1;
+  else if (exitCode === 0 && safety.fail === 0 && safety.pass === 0) exitCode = 1; // 一条都没跑也算失败
 }
 
 process.exit(exitCode);

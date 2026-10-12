@@ -351,6 +351,22 @@ try {
       `${answer2.questions.length} 题 / ${answer2.failedCount} 失败`);
     check('失败题在答卷里被标注', answer2.questions.some((q) => q.failed === true));
   }
+
+  // ------------------------------------------------- 静态服务器路径安全
+  section('静态服务器路径安全');
+  {
+    // 只测浏览器能观测到的部分：隐藏路径（`.git/config` 之类）。
+    // 目录穿越在浏览器里会被客户端归一化掉、根本发不出去，必须由 Node 侧的
+    // test/server-safety.mjs 覆盖，那里用 http.request 原样发送路径字符串。
+    const statusOf = async (p) => (await fetch(new URL(p, location.origin))).status;
+    for (const p of ['/.git/config', '/.git/index', '/.env', '/.DS_Store',
+      '/legacy/zhijie-solver-node-server/.gitignore']) {
+      check(`隐藏路径被拒绝 ${p}`, (await statusOf(p)) === 403);
+    }
+    check('.nojekyll 白名单仍可访问', (await statusOf('/.nojekyll')) === 200);
+    check('站点页面不受影响', (await statusOf('/index.html')) === 200);
+    check('测试承载页可访问', (await statusOf('/test/index.html')) === 200);
+  }
 } catch (e) {
   failures.push(`测试执行中断：${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`);
   lines.push(`\n!! 测试执行中断：${e}`);
