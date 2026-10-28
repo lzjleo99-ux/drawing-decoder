@@ -44,7 +44,14 @@ function loadScript(url) {
     const s = document.createElement('script');
     s.src = url; s.async = true;
     s.onload = () => res();
-    s.onerror = () => rej(new Error(t('err.loadScript') + url));
+    s.onerror = () => {
+      // [FIX M6] 失败必须把缓存清掉。原来这里把 rejected promise 永久留在
+      // scriptCache 里，第一次加载失败（离线 / CDN 5xx / 被墙）之后，网络恢复了
+      // 也永远加载不了 —— html2canvas / jspdf / pdf.js 三个导出功能全部失效，
+      // 用户必须手动刷新页面，看起来就像"功能坏了"。
+      scriptCache.delete(url);
+      rej(new Error(t('err.loadScript') + url));
+    };
     document.head.appendChild(s);
   });
   scriptCache.set(url, p); return p;
@@ -3275,7 +3282,16 @@ function bindUI() {
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !historyPage.hidden) closeHistoryPage(); });
   }
   const historySearch = $('#historySearch');
-  if (historySearch) historySearch.addEventListener('input', renderHistoryPage);
+  if (historySearch) {
+    // [FIX L3] 输入防抖。renderHistoryPage 每次都 loadHist()（JSON.parse 整份含
+    // base64 缩略图的历史）再重建 innerHTML，绑在 input 上等于每敲一个字符做一遍。
+    // 实测 12 条满配记录单次约 1.9ms parse + DOM 重建，150ms 防抖即可消除重复劳动。
+    let histSearchTimer;
+    historySearch.addEventListener('input', () => {
+      clearTimeout(histSearchTimer);
+      histSearchTimer = setTimeout(renderHistoryPage, 150);
+    });
+  }
   const historyBackBtn = $('#historyBackBtn');
   if (historyBackBtn) historyBackBtn.addEventListener('click', () => {
     showExample(); $('#reportState').textContent = t('report.state.demo');

@@ -56,14 +56,22 @@ function normalizeBlocks(blocks) {
 /** 有上限的并发执行，避免一次打满速率限制。 */
 async function pooled(items, limit, worker) {
   const results = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+  let next = 0, failure = null;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (;;) {
+      // [FIX M5] 一处失败后立刻停止领取新任务。
+      // 原来 Promise.all 在第一个 reject 时就返回了，但其他 worker 的循环没有停止条件，
+      // 会继续 next++ 并调用 worker —— 真实场景下就是"用户已经看到失败，后台还在按题
+      // 调模型计费"。现在用共享的 failure 标志让全体收敛，并等所有在途任务收尾。
+      if (failure) return;
       const i = next++;
       if (i >= items.length) return;
-      results[i] = await worker(items[i], i);
+      try { results[i] = await worker(items[i], i); }
+      catch (e) { failure = e; throw e; }
     }
-  }));
+  });
+  await Promise.allSettled(runners);
+  if (failure) throw failure;
   return results;
 }
 
@@ -71,6 +79,20 @@ function describeError(e) {
   if (e && e.code === 'invalid_json') return T('serr.badJson');
   if (e && e.message) return e.message;
   return String(e);
+}
+
+// [FIX M1] 抽取文本的长度上限。
+// 图纸台在 app.js 里按 limits.maxPromptBytes 截断提示词，作业侧原来完全没做：
+// extractPdf 会把**所有页**的文字拼进 text（只有图片限 10 页，文字不限），
+// 一份 200 页的 PDF 能产出几百 KB，直接超出模型上下文 —— 表现为泛化的 API 错误，
+// 而且按输入 token 计费，成本远超预期。
+const MAX_SOURCE_CHARS = 180000;
+
+function capSource(text, log) {
+  const s = String(text || '');
+  if (s.length <= MAX_SOURCE_CHARS) return s;
+  log(TF('slog.textTruncated', { n: s.length, cap: MAX_SOURCE_CHARS }), 'warn');
+  return s.slice(0, MAX_SOURCE_CHARS) + '\n\n[原文过长，已截断]';
 }
 
 /**
@@ -96,7 +118,7 @@ export async function solve(extracted, opts, log) {
   log(images.length ? TF('slog.splittingImg', { n: images.length }) : T('slog.splitting'));
   let paper;
   try {
-    paper = await sample.json(splitPrompt(extracted.text || '(empty)', images.length > 0, subjectKey), { images, tier, maxPower });
+    paper = await sample.json(splitPrompt(capSource(extracted.text || '(empty)', log), images.length > 0, subjectKey), { images, tier, maxPower });
   } catch (e) {
     throw new Error(TF('serr.split', { msg: describeError(e) }));
   }

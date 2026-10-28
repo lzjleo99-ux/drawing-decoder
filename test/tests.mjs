@@ -352,6 +352,36 @@ try {
     check('失败题在答卷里被标注', answer2.questions.some((q) => q.failed === true));
   }
 
+  // ------------------------------------------------- 回归：本轮修复的问题
+  section('回归：历史保存与 PDF 资源释放');
+  {
+    // H2：写入失败必须如实上报，不能静默当成成功。
+    // 用 Storage.prototype.setItem 抛错来模拟配额耗尽（真实场景：图纸台的 base64
+    // 缩略图先占满同一个 origin 的配额）。
+    const { saveToHistory } = await import('../solver/history.js');
+    const realSetItem = Storage.prototype.setItem;
+    let result;
+    try {
+      Storage.prototype.setItem = function () {
+        throw new DOMException('quota exceeded', 'QuotaExceededError');
+      };
+      result = saveToHistory({
+        meta: { title: 'quota-test' },
+        questions: [{ number: '一', blocks: [{ type: 'text', text: 'x' }] }],
+      });
+    } finally {
+      Storage.prototype.setItem = realSetItem;
+    }
+    check('H2 写入失败时返回 saved:false', result && result.saved === false, JSON.stringify(result));
+    check('H2 写入失败不抛异常（调用方仍能继续）', !!result);
+
+    // H1：坏 PDF 之后仍能解析正常 PDF —— 若 pdfjs 任务没被 finally 释放，
+    // 这一步会受残留 worker / 缓冲区影响。
+    await extract(new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], 'broken.pdf')).catch(() => {});
+    const recovered = await extract(await fetchFile('homework.pdf'));
+    check('H1 坏 PDF 之后仍能解析正常 PDF', recovered.pageCount >= 1, `${recovered.pageCount} 页`);
+  }
+
   // ------------------------------------------------- 静态服务器路径安全
   section('静态服务器路径安全');
   {

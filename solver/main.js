@@ -149,7 +149,13 @@ function showTab(which) {
   el.logView.hidden = preview;
   el.previewWrap.hidden = !preview || !answerDoc;
   el.emptyHint.hidden = !preview || !!answerDoc;
-  if (preview) scalePreview();
+  if (preview) {
+    // [FIX L1] 切回预览时补测一次溢出。语言切换 / 自动排版开关会在"日志页"状态下
+    // 重渲染答卷，那时 el.sheet 在隐藏容器里、clientWidth 恒为 0，fitEquations 会
+    // 直接返回空数组（量不出溢出）。不在这里补测，超宽公式就会一直溢出到下次重渲染。
+    if (answerDoc && el.autoLayout.checked) fitEquations(el.sheet);
+    scalePreview();
+  }
 }
 
 // ---------------- 预览缩放：纸张按 A4 实宽渲染，整体缩放到面板宽度 ----------------
@@ -302,9 +308,12 @@ async function run() {
     await (document.fonts?.ready ?? Promise.resolve());
     paintAnswer(answerDoc);
 
-    const { total } = saveToHistory(answerDoc);
+    const { total, saved } = saveToHistory(answerDoc);
     renderHistoryList();
-    log(`${T('solver.hist.saved', '已存入历史记录')}（${total}/${HISTORY_CAP}）`, 'ok');
+    // [FIX H2] 写入失败必须如实报错。原来无论写没写进去都用 'ok'（绿色）打印
+    // "已存入历史记录"，用户会以为存好了，刷新后才发现记录没了。
+    if (saved) log(`${T('solver.hist.saved', '已存入历史记录')}（${total}/${HISTORY_CAP}）`, 'ok');
+    else log(T('solver.hist.saveFailed', '历史记录写入失败：浏览器存储空间不足，请清理旧记录或图纸历史后重试'), 'error');
     log(T('slog.done'), 'ok');
   } catch (e) {
     log(e.message, 'error');
@@ -312,6 +321,9 @@ async function run() {
     showTab('log');
   } finally {
     setBusy(false);
+    // [FIX L2] 清空 file input 的 value。否则用户想对同一个文件换档位再跑一次时，
+    // 重新选中同名文件不会触发 change 事件（value 没变），界面毫无反应。
+    el.fileInput.value = '';
   }
 }
 

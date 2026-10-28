@@ -198,56 +198,100 @@ function anthropicMessages(turns, imgs) {
   })();
 }
 
+// [FIX H3] 安全取 host。分享链接少了 https:// 时 new URL() 会抛错；
+// 若在 catch 块里直接调用，就会把原本要报的友好提示顶掉，用户只看到 "Invalid URL"。
+function hostOf(u) {
+  try { return new URL(u).host; } catch { return String(u || '').slice(0, 60); }
+}
+
+// [FIX M2] 单次请求的总预算。原来完全没有超时：vendor 建立连接后不吐数据时
+// await reader.read() 会无限等待，busy 一直为 true，按钮禁用、拖放区失活，
+// 整个页面只能靠刷新恢复。移动网络切换、代理挂死时很容易触发。
+const REQUEST_TIMEOUT_MS = 180000;
+
 // Anthropic 原生请求，和经过分享代理转发的请求，body 构造与 SSE 解析完全一样，只是 url/header 不同
 async function callAnthropicLike(vendor, url, buildHeaders, model, turns, imgs, opts) {
   const msgs = await anthropicMessages(turns, imgs);
-  let res = null, err = null;
-  for (let i = getProfile(); i < PROFILES.length; i++) {
-    const tools = opts.webSearch ? [{ type: 'web_search_20260209', name: 'web_search' }] : opts.tools;
-    const body = buildBody(model, msgs, opts.modelTier, PROFILES[i], tools);
-    let r;
-    try {
-      r = await fetch(url, { method: 'POST', signal: opts.signal, headers: buildHeaders(), body: JSON.stringify(body) });
-    } catch (e) {
-      if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
-      throw { code: 'api_error', message: '连不上 ' + new URL(url).host + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
-    }
-    if (r.ok) { res = r; if (i !== getProfile()) { setProfile(i); console.info('[bridge] 采用参数档位：' + PROFILES[i].label); } break; }
-    let j = null; try { j = await r.json(); } catch (e) { }
-    err = mapError(vendor, r.status, j);
-    if (/credit balance|billing|Plans & Billing|authentication|api key|not permitted|does not have access|invalid or expired share token/i.test(err.raw || '')) throw err;
-    if (r.status !== 400 || i === PROFILES.length - 1) throw err;
-    console.warn('[bridge] 参数档位 "' + PROFILES[i].label + '" 被拒绝，降档重试。原因：' + err.raw);
-  }
-  if (!res) throw err || { code: 'api_error', message: '请求失败' };
 
-  const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = '', text = '', truncated = false;
-  for (; ;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-      for (const line of chunk.split('\n')) {
-        if (line.indexOf('data:') !== 0) continue;
-        const raw = line.slice(5).trim();
-        if (!raw || raw === '[DONE]') continue;
-        let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
-        if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
-          text += ev.delta.text;
-          if (opts.onText) { try { opts.onText({ text: text, delta: ev.delta.text }); } catch (e) { } }
-        } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason === 'max_tokens') {
-          truncated = true;
-        } else if (ev.type === 'error') {
-          throw mapError(vendor, 200, ev);
+  // [FIX M2] 一个控制器同时覆盖 fetch 与流式读取：任何阶段卡住，预算到点都会中止。
+  const ctrl = new AbortController();
+  const budget = opts.timeoutMs || REQUEST_TIMEOUT_MS;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, budget);
+  const onUserAbort = () => ctrl.abort();
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener('abort', onUserAbort, { once: true });
+  }
+  const timeoutError = () => ({ code: 'timeout', message: `请求超时（${Math.round(budget / 1000)}s），请重试或换一个模型` });
+
+  try {
+    let res = null, err = null;
+    for (let i = getProfile(); i < PROFILES.length; i++) {
+      const tools = opts.webSearch ? [{ type: 'web_search_20260209', name: 'web_search' }] : opts.tools;
+      const body = buildBody(model, msgs, opts.modelTier, PROFILES[i], tools);
+      let r;
+      try {
+        r = await fetch(url, { method: 'POST', signal: ctrl.signal, headers: buildHeaders(), body: JSON.stringify(body) });
+      } catch (e) {
+        if (timedOut) throw timeoutError();
+        if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
+        throw { code: 'api_error', message: '连不上 ' + hostOf(url) + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
+      }
+      if (r.ok) { res = r; if (i !== getProfile()) { setProfile(i); console.info('[bridge] 采用参数档位：' + PROFILES[i].label); } break; }
+      let j = null; try { j = await r.json(); } catch (e) { }
+      err = mapError(vendor, r.status, j);
+      if (/credit balance|billing|Plans & Billing|authentication|api key|not permitted|does not have access|invalid or expired share token/i.test(err.raw || '')) throw err;
+      if (r.status !== 400 || i === PROFILES.length - 1) throw err;
+      console.warn('[bridge] 参数档位 "' + PROFILES[i].label + '" 被拒绝，降档重试。原因：' + err.raw);
+    }
+    if (!res) throw err || { code: 'api_error', message: '请求失败' };
+
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '', text = '', truncated = false;
+    // [FIX H4] 流读取阶段的异常也必须归一化，reader 必须在 finally 里释放。
+    // 原来 AbortError 只在 fetch 的 catch 里处理，用户生成到一半点取消会看到原始的
+    // "AbortError: The user aborted a request."；而提前 throw（上游 error 事件）
+    // 会让 reader 一直锁着底层连接。
+    try {
+      for (; ;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+          for (const line of chunk.split('\n')) {
+            if (line.indexOf('data:') !== 0) continue;
+            const raw = line.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+            if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+              text += ev.delta.text;
+              if (opts.onText) { try { opts.onText({ text: text, delta: ev.delta.text }); } catch (e) { } }
+            } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason === 'max_tokens') {
+              truncated = true;
+            } else if (ev.type === 'error') {
+              throw mapError(vendor, 200, ev);
+            }
+          }
         }
       }
+    } catch (e) {
+      if (timedOut) throw timeoutError();
+      if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
+      throw e;
+    } finally {
+      try { await reader.cancel(); } catch { /* 已经结束 */ }
+      try { reader.releaseLock(); } catch { /* 已经释放 */ }
     }
+
+    if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
+    return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
+  } finally {
+    clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener('abort', onUserAbort);
   }
-  if (!text.trim()) throw { code: 'empty_completion', message: '模型没有返回内容' };
-  return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
 }
 
 async function callAnthropic(model, turns, imgs, opts) {
@@ -343,59 +387,90 @@ async function callOpenAICompatible(vendor, url, key, model, turns, imgs, opts) 
   if (opts.maxPower) body.thinking = { type: 'enabled' }; // 智谱系模型的"深度思考"开关，别的厂商没有就忽略
   if (opts.tools && opts.tools.length) body.tools = opts.tools;
 
-  let r;
-  try {
-    r = await fetch(url, {
-      method: 'POST',
-      signal: opts.signal,
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
-    throw { code: 'api_error', message: '连不上 ' + new URL(url).host + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
+  // [FIX H3] 用 hostOf 安全取 host —— 原来 catch 里直接 new URL()，地址缺协议时
+  // 会二次抛错，把友好提示顶掉，用户只看到 "Invalid URL"。
+  // [FIX M2] 与 callAnthropicLike 一致：一个控制器覆盖 fetch + 流式读取的总预算。
+  // [FIX H4] 流读取阶段的异常同样归一化，reader 在 finally 里释放。
+  const ctrl = new AbortController();
+  const timeoutMs = opts.timeoutMs || REQUEST_TIMEOUT_MS;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+  const onUserAbort = () => ctrl.abort();
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener('abort', onUserAbort, { once: true });
   }
-  if (!r.ok) {
-    let j = null; try { j = await r.json(); } catch (e) { }
-    throw mapError(vendor, r.status, j);
-  }
+  const timeoutError = () => ({ code: 'timeout', message: `请求超时（${Math.round(timeoutMs / 1000)}s），请重试或换一个模型` });
 
-  const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = '', text = '', reasoning = '', truncated = false;
-  for (; ;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-      for (const line of chunk.split('\n')) {
-        if (line.indexOf('data:') !== 0) continue;
-        const raw = line.slice(5).trim();
-        if (!raw || raw === '[DONE]') continue;
-        let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
-        const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
-        // 思考型模型的推理走单独字段，不计入正文：Apex 用 reasoning，DeepSeek 系用 reasoning_content
-        if (d && (d.reasoning || d.reasoning_content)) reasoning += (d.reasoning || d.reasoning_content);
-        if (d && d.content) {
-          text += d.content;
-          if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) { } }
-        }
-        if (ev.choices && ev.choices[0] && ev.choices[0].finish_reason === 'length') truncated = true;
-      }
+  try {
+    let r;
+    try {
+      r = await fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (timedOut) throw timeoutError();
+      if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
+      throw { code: 'api_error', message: '连不上 ' + hostOf(url) + '（网络或代理问题）：' + (e && e.message ? e.message : e) };
     }
+    if (!r.ok) {
+      let j = null; try { j = await r.json(); } catch (e) { }
+      throw mapError(vendor, r.status, j);
+    }
+
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '', text = '', reasoning = '', truncated = false;
+    try {
+      for (; ;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+          for (const line of chunk.split('\n')) {
+            if (line.indexOf('data:') !== 0) continue;
+            const raw = line.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+            const d = ev.choices && ev.choices[0] && ev.choices[0].delta;
+            // 思考型模型的推理走单独字段，不计入正文：Apex 用 reasoning，DeepSeek 系用 reasoning_content
+            if (d && (d.reasoning || d.reasoning_content)) reasoning += (d.reasoning || d.reasoning_content);
+            if (d && d.content) {
+              text += d.content;
+              if (opts.onText) { try { opts.onText({ text: text, delta: d.content }); } catch (e) { } }
+            }
+            if (ev.choices && ev.choices[0] && ev.choices[0].finish_reason === 'length') truncated = true;
+          }
+        }
+      }
+    } catch (e) {
+      if (timedOut) throw timeoutError();
+      if (e && e.name === 'AbortError') throw { code: 'cancelled', message: '已中止' };
+      throw e;
+    } finally {
+      try { await reader.cancel(); } catch { /* 已经结束 */ }
+      try { reader.releaseLock(); } catch { /* 已经释放 */ }
+    }
+
+    if (!text.trim()) {
+      // 推理同样消耗 max_tokens。Apex 的 Qwen3.6-35B-A3B 实测会在一道简单算术题上
+      // 写一万多字推理把预算耗尽，一个字正文都不产出 —— 此时只说"没有返回内容"
+      // 会让人以为是 Key 或网络的问题，得说清楚到底发生了什么、该怎么办。
+      const budget = opts.maxPower ? 32000 : 8192;
+      const why = truncated && reasoning
+        ? '：模型把 ' + budget + ' 的输出预算全部用在了推理上，没来得及给出答案。请换一个推理更短的模型（Apex 建议用 Qwen3.8-27B），或把题目拆小一些。'
+        : (reasoning ? '：模型只输出了推理过程，没有给出正文。' : '');
+      throw { code: 'empty_completion', message: '模型没有返回内容' + why };
+    }
+    return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
+  } finally {
+    clearTimeout(timer);
+    if (opts.signal) opts.signal.removeEventListener('abort', onUserAbort);
   }
-  if (!text.trim()) {
-    // 推理同样消耗 max_tokens。Apex 的 Qwen3.6-35B-A3B 实测会在一道简单算术题上
-    // 写一万多字推理把预算耗尽，一个字正文都不产出 —— 此时只说"没有返回内容"
-    // 会让人以为是 Key 或网络的问题，得说清楚到底发生了什么、该怎么办。
-    const budget = opts.maxPower ? 32000 : 8192;
-    const why = truncated && reasoning
-      ? '：模型把 ' + budget + ' 的输出预算全部用在了推理上，没来得及给出答案。请换一个推理更短的模型（Apex 建议用 Qwen3.8-27B），或把题目拆小一些。'
-      : (reasoning ? '：模型只输出了推理过程，没有给出正文。' : '');
-    throw { code: 'empty_completion', message: '模型没有返回内容' + why };
-  }
-  return { text: text, truncated: truncated, modelTierApplied: opts.modelTier || 'default' };
 }
 
 async function callZhipu(model, turns, imgs, opts) {
@@ -438,6 +513,11 @@ const sample = async function (input, options) { return await callAPI(input, opt
 
 sample.json = async function (input, options) {
   const r = await callAPI(input, options);
+  // [FIX M3] 被 max_tokens 截断时 JSON 必然不完整。原来这个标记被直接丢掉，
+  // 用户只会看到"返回的不是合法 JSON"，误以为是模型抽风，反复用同样的配置重试。
+  if (r.truncated) {
+    throw { code: 'truncated', message: '模型输出达到 max_tokens 上限被截断，请调高预算或把档位换成「复杂」', text: r.text };
+  }
   let s = r.text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/, '').trim();
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
   if (a >= 0 && b > a) s = s.slice(a, b + 1);

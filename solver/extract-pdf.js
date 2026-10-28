@@ -17,6 +17,12 @@ function loadPdfjs() {
     pdfjsPromise = import(PDFJS_URL).then((lib) => {
       lib.GlobalWorkerOptions.workerSrc = WORKER_URL;
       return lib;
+    }).catch((err) => {
+      // [FIX M4] 失败时必须把缓存清空。原来这里把 rejected promise 永久留在
+      // pdfjsPromise 里，一次离线（或 CDN 临时 5xx）之后，网络恢复了也永远解析不了
+      // PDF，用户必须手动刷新页面 —— 看起来就像"这个功能坏了"。
+      pdfjsPromise = null;
+      throw err;
     });
   }
   return pdfjsPromise;
@@ -96,10 +102,17 @@ async function renderPageToBlob(page, scale = PDF_RENDER_SCALE) {
   // 白底：PDF 透明区域在 PNG 里会变黑，模型会看不清
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: ctx, viewport }).promise;
-  return await new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('页面栅格化失败'))), 'image/png');
-  });
+  try {
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('页面栅格化失败'))), 'image/png');
+    });
+  } finally {
+    // [FIX L5] 主动把像素缓冲缩到 0。A4 在 2.2 倍下约 1300×1850（单张 ~10MB），
+    // 10 页峰值可达 100MB；不显式释放的话移动端 Safari 容易在中途被杀。
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 /**
@@ -112,6 +125,21 @@ export async function extractPdf(buf, log = () => {}) {
   const warnings = [];
 
   const task = pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false });
+
+  // [FIX H1] 任务生命周期必须由 finally 兜住。
+  // 原来 task.destroy() 写在函数最后一行，中途任何一步抛错（损坏页、内存不足、
+  // canvas.toBlob 返回 null）都会跳过它，pdfjs 的 worker 线程与整份 PDF 的
+  // Uint8Array 就一直活着 —— 连续上传几个坏文件后内存持续上涨，最后连正常文件
+  // 也解不开。改成 try/finally 后，成功失败都释放。
+  try {
+    return await extractWithTask(pdfjs, task, warnings, log);
+  } finally {
+    try { await task.destroy(); } catch { /* 已经销毁过 */ }
+  }
+}
+
+/** 真正的抽取流程。单独拆出来，是为了让 task 的销毁由上面的 finally 统一负责。 */
+async function extractWithTask(pdfjs, task, warnings, log) {
   const doc = await task.promise;
 
   const pages = [];
@@ -159,7 +187,7 @@ export async function extractPdf(buf, log = () => {}) {
 
   const text = pages.join('\n\n');
   const pageCount = doc.numPages;
-  await task.destroy();
+  // [FIX H1] 原来这里有一行 `await task.destroy();`，现在统一由 extractPdf 的 finally 负责。
 
   if (pageCount > budget) {
     const picked = [...chosen].sort((a, b) => a - b).join(', ');

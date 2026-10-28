@@ -20,20 +20,30 @@ export function loadHistory() {
   }
 }
 
+function hasFigures(entry) {
+  return !!entry.doc?.questions?.some((q) => q.blocks?.some((b) => b.type === 'figure'));
+}
+
 function writeList(list) {
-  // 降级顺序：先去图，再逐条丢最老的。直接 pop 会无谓地丢掉本可保留的记录。
-  for (let attempt = 0; attempt < 6; attempt++) {
+  // [FIX H2] 返回写入结果，并一次剥掉所有含图的记录。
+  //
+  // 原来的降级循环每轮只剥「一条」记录的图，6 轮最多腾出 6 条的空间。当配额缺口更大
+  // （典型场景：图纸台的 base64 缩略图先占满了同一个 origin 的配额）时，循环耗尽后
+  // 直接 `return list` —— 什么都没写进去，却当成成功返回，界面于是用绿色 ok 打印
+  // "已存入历史记录"。刷新后记录消失，且没有任何错误提示。
+  let working = list;
+  for (let attempt = 0; attempt < 12; attempt++) {
     try {
-      localStorage.setItem(HK, JSON.stringify(list));
-      return list;
+      localStorage.setItem(HK, JSON.stringify(working));
+      return { ok: true, list: working };
     } catch {
-      const withFigures = list.find((h) => h.doc?.questions?.some((q) => q.blocks?.some((b) => b.type === 'figure')));
-      if (withFigures) stripFigures(withFigures);
-      else if (list.length > 1) list.pop();
-      else return list.slice(0, 0);
+      const withFigures = working.filter(hasFigures);
+      if (withFigures.length) { withFigures.forEach(stripFigures); continue; }
+      if (working.length > 1) { working = working.slice(0, -1); continue; }
+      return { ok: false, list: working };   // 单条都放不下，如实报告失败
     }
   }
-  return list;
+  return { ok: false, list: working };
 }
 
 function stripFigures(entry) {
@@ -66,11 +76,12 @@ export function saveToHistory(answerDoc) {
   list.unshift(entry);
   while (list.length > CAP) list.pop();
   const written = writeList(list);
-  return { id, total: written.length };
+  // [FIX H2] 把"到底写没写进去"如实带给调用方
+  return { id, total: written.list.length, saved: written.ok };
 }
 
 export function removeFromHistory(id) {
-  return writeList(loadHistory().filter((h) => h.id !== id));
+  return writeList(loadHistory().filter((h) => h.id !== id)).list;
 }
 
 export function clearHistory() {

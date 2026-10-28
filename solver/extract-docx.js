@@ -255,19 +255,28 @@ export async function extractDocx(buf) {
   const ctx = {
     equationCount: 0,
     charsBySize: new Map(),
+    nextImageIdx: 1,
     // 图片按首次出现顺序编号，文本里留下 [图N] 标记供模型与图片列表对应
     addImage(rid) {
-      if (seen.has(rid)) return ` [图${seen.get(rid)}] `;
+      // [FIX L4] 重复引用时也要区分"已识别"和"超限未识别"，否则同一张超限图
+      // 第二次出现会被标成 [图N]，看起来像已经送进视觉通道了。
+      if (seen.has(rid)) {
+        const n = seen.get(rid);
+        return images.some((i) => i.index === n) ? ` [图${n}] ` : ` [图${n}·未识别] `;
+      }
       const target = rels.get(rid);
       if (!target) return '';
-      const idx = seen.size + 1;
+      // [FIX L4] 编号必须用单调递增计数器，不能用 seen.size + 1。
+      // 超过 MAX_IMAGES 的图片原来不写入 seen，于是下一张超限图算出同样的编号，
+      // 文本里出现多个 [图13·未识别]，模型无法区分是第几张。
+      const idx = ctx.nextImageIdx++;
+      seen.set(rid, idx);
       if (images.length >= MAX_IMAGES) {
         if (!warnings.some((w) => w.includes('图片数量'))) {
           warnings.push(`图片数量超过 ${MAX_IMAGES} 张，其余图片未送入识别`);
         }
         return ` [图${idx}·未识别] `;
       }
-      seen.set(rid, idx);
       images.push({ index: idx, path: `word/${target}` });
       return ` [图${idx}] `;
     },
